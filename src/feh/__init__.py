@@ -1,0 +1,1 @@
+# Packages are characterized by having this file, which is for package initialization. Good practice to have it.
