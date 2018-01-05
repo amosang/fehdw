@@ -2,24 +2,16 @@ import datetime
 import functools
 import pandas as pd
 import os
-import re
+import logging
 from configobj import ConfigObj
 from pandas import DataFrame
 
 
 class DataReader(object):
-    config = None
+    config = ConfigObj('fehdw.conf')
 
     def __init__(self):
         pass
-
-    @classmethod
-    def initialize(cls):
-        """
-        Loads the .conf file.
-        :return:
-        """
-        cls.config = ConfigObj('fehdw.conf')
 
     @classmethod
     def print_cfg(cls):
@@ -69,12 +61,26 @@ class OperaDataReader(DataReader):
 
     """
     df_data = DataFrame()  # Instance attribute which holds the data read in, if any.
-    c_str_fn = None
-    c_read_type = None
 
     def __init__(self, str_fn=None, read_type=None):
-        self.c_str_fn = str_fn
-        self.c_read_type = read_type
+        # LOGGING #
+        self.logger = logging.getLogger('opera_datareader')
+        if self.logger.hasHandlers():  # Clear existing handlers, else will have duplicate logging messages.
+            self.logger.handlers.clear()
+        # Create the handler for the main logger
+        str_fn_logger = os.path.join(self.config['global']['global_root_folder'], self.config['data_sources']['opera']['logfile'])
+        fh_logger = logging.FileHandler(str_fn_logger)
+        str_format = '[%(asctime)s] - [%(levelname)s] - %(message)s'
+        fh_logger.setFormatter(logging.Formatter(str_format))
+        self.logger.addHandler(fh_logger)  # Add the handler to the base logger
+        self.logger.setLevel(logging.INFO)  # By default, logging will start at 'WARNING' unless we tell it otherwise.
+
+    def __del__(self):
+        # Logging. Close all file handlers to release the lock on the open files.
+        handlers = self.log.handlers[:]  # https://stackoverflow.com/questions/15435652/python-does-not-release-filehandles-to-logfile
+        for handler in handlers:
+            handler.close()
+            self.log.removeHandler(handler)
 
     def read(self, read_type='one', str_fn_60_new=None, str_fn_61_new=None):  # Read what? one/all/latest
         self.df_data = DataFrame()  # Clear instance variable each time.

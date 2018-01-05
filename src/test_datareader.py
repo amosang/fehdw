@@ -6,13 +6,12 @@ from pandas import DataFrame
 
 from feh.datareader import DataReader, OperaDataReader
 
-DataReader.initialize()  # Always initialize, to load the config file.
-#DataReader.print_cfg()
-odr = OperaDataReader()
-odr.read()
+test_case = 'logging'
 
+if test_case == 'logging':
+    odr = OperaDataReader()
+    odr.logger.info('TEST Message 3')
 
-print(odr.c_str_fn)
 
 # str_date = datetime.datetime.today().strftime('%d%b%Y').upper()
 str_date = '02JAN2018'  # DEBUG - HARDCODED!
