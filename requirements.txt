@@ -1,4 +1,4 @@
 configobj
 xlrd
-pandas==0.21.1
+pandas
 

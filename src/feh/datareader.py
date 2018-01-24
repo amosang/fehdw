@@ -5,7 +5,7 @@ import os
 import logging
 from configobj import ConfigObj
 from pandas import DataFrame
-
+from feh.utils import dec_err_handler
 
 class DataReader(object):
     config = ConfigObj('fehdw.conf')
@@ -61,8 +61,9 @@ class OperaDataReader(DataReader):
 
     """
     df_data = DataFrame()  # Instance attribute which holds the data read in, if any.
+    # logger -> instance variable.
 
-    def __init__(self, str_fn=None, read_type=None):
+    def __init__(self):
         # LOGGING #
         self.logger = logging.getLogger('opera_datareader')
         if self.logger.hasHandlers():  # Clear existing handlers, else will have duplicate logging messages.
@@ -77,10 +78,14 @@ class OperaDataReader(DataReader):
 
     def __del__(self):
         # Logging. Close all file handlers to release the lock on the open files.
-        handlers = self.log.handlers[:]  # https://stackoverflow.com/questions/15435652/python-does-not-release-filehandles-to-logfile
+        handlers = self.logger.handlers[:]  # https://stackoverflow.com/questions/15435652/python-does-not-release-filehandles-to-logfile
         for handler in handlers:
             handler.close()
-            self.log.removeHandler(handler)
+            self.logger.removeHandler(handler)
+
+    @dec_err_handler(retries=3)
+    def test_decorator(self, x, y):
+        print(f'{x} divided by {y} is {x / y}')
 
     def read(self, read_type='one', str_fn_60_new=None, str_fn_61_new=None):  # Read what? one/all/latest
         self.df_data = DataFrame()  # Clear instance variable each time.
@@ -161,3 +166,5 @@ class OperaDataReader(DataReader):
             pass
 
         return self.df_data
+
+
