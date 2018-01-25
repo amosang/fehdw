@@ -1,0 +1,9 @@
+[TO DO]
+- Data loading log feature. To retrofit classes such that will check before loading.
+
+- Function to persist to DB, all file imports (nicety?) Source system, filename, timestamp, target table.
+
+[DONE]
+- WinTaskScheduler task "feh_data_loader" to trigger C:\fehdw\src\scheduler_load_data.py every half hour to check
+- Decorator for error handling, logging, and retries.
+- Interactive test code. Try launch Jupyter notebook from project root; to be able to use feh package.

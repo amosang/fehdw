@@ -3,19 +3,21 @@ import os
 import re
 import datetime as dt
 from feh.datareader import OperaDataReader
-from configobj import ConfigObj
-from pandas import DataFrame
+from feh.utils import get_files
 
-test_case = 'decorator'  #### TEST CASE!
+
+test_case = 'load_files'  #### TEST CASE!
+
+if test_case == 'load_files':
+    odr = OperaDataReader()
+    odr.load()
 
 
 if test_case == 'read_files':
     odr = OperaDataReader()
     str_folder = odr.config['data_sources']['opera']['root_folder']
-    odr.logger.info(dt.datetime.today())
-
-    print(str_folder)
-
+    str_fn = get_files(str_folder=str_folder, pattern='60 days.xlsx$', latest_only=True)
+    odr.logger.info(f'Loading {str_fn}')
 
 if test_case == 'decorator':
     odr = OperaDataReader()
