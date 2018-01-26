@@ -37,3 +37,23 @@
 [2018-01-25 17:10:48,409] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics 11Jul15 fwd 61 days.xlsx, using local copy C:\fehdw\temp\Reservation Analytics 11Jul15 fwd 61 days.xlsx
 [2018-01-25 17:14:59,597] - [INFO] - Writing to database
 [2018-01-25 17:32:34,322] - [INFO] - TEST TIME: 17:32:34.275302
+[2018-01-26 05:30:01,699] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics 11Jul15 fwd 61 days.xlsx, using local copy C:\fehdw\temp\Reservation Analytics 11Jul15 fwd 61 days.xlsx
+[2018-01-26 05:34:12,338] - [INFO] - Writing to database
+[2018-01-26 14:23:14,158] - [ERROR] - Maximum data load frequency exceeded. Source: opera, Dest: mysql, File: Reservation Analytics 11Jul15 fwd 61 days.xlsx
+[2018-01-26 14:43:19,263] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics 11Jul15 fwd 61 days.xlsx, using local copy C:\fehdw\temp\Reservation Analytics 11Jul15 fwd 61 days.xlsx
+[2018-01-26 14:47:29,351] - [INFO] - Writing to database.
+[2018-01-26 14:47:33,787] - [INFO] - Logged data load to system log.
+[2018-01-26 14:49:32,818] - [ERROR] - Maximum data load frequency exceeded. Source: opera, Dest: mysql, File: Reservation Analytics 11Jul15 fwd 61 days.xlsx
+[2018-01-26 15:28:21,430] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics RES -History.xlsx, using local copy C:\fehdw\temp\Reservation Analytics RES -History.xlsx
+[2018-01-26 15:53:01,599] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics RES -History.xlsx, using local copy C:\fehdw\temp\Reservation Analytics RES -History.xlsx
+[2018-01-26 15:55:06,475] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics RES -History.xlsx, using local copy C:\fehdw\temp\Reservation Analytics RES -History.xlsx
+[2018-01-26 15:55:36,933] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics RES -History.xlsx, using local copy C:\fehdw\temp\Reservation Analytics RES -History.xlsx
+[2018-01-26 15:58:08,026] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics RES -History.xlsx, using local copy C:\fehdw\temp\Reservation Analytics RES -History.xlsx
+[2018-01-26 15:58:37,533] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics RES -History.xlsx, using local copy C:\fehdw\temp\Reservation Analytics RES -History.xlsx
+[2018-01-26 16:00:02,197] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics RES -History.xlsx, using local copy C:\fehdw\temp\Reservation Analytics RES -History.xlsx
+[2018-01-26 16:08:25,095] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics RES -History.xlsx, using local copy C:\fehdw\temp\Reservation Analytics RES -History.xlsx
+[2018-01-26 16:08:42,987] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics RES -History.xlsx, using local copy C:\fehdw\temp\Reservation Analytics RES -History.xlsx
+[2018-01-26 16:09:26,148] - [INFO] - Reading from //10.0.2.251/fesftp/feh\Reservation Analytics RES -History.xlsx, using local copy C:\fehdw\temp\Reservation Analytics RES -History.xlsx
+[2018-01-26 16:13:03,868] - [INFO] - Writing to database.
+[2018-01-26 16:13:05,351] - [INFO] - Logged data load activity to system log table.
+[2018-01-26 16:20:08,048] - [ERROR] - Maximum data load frequency exceeded. Source: opera, Dest: mysql, File: Reservation Analytics RES -History.xlsx

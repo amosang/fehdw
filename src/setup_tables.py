@@ -7,9 +7,9 @@ dr = DataReader()  # Use this for the database conn only.
 
 # Table: sys_cfg_dataload. Policy table which controls how frequently a source can move data to destination.
 
-df = DataFrame(columns=['source', 'dest', 'max_freq', 'freq_unit'],
-                  data=[['opera', 'mysql', 1, 'd'],
-                        ['otai', 'mysql', 1, 'd']
+df = DataFrame(columns=['source', 'dest', 'file', 'max_freq', 'freq_unit'],
+                  data=[['opera', 'mysql', '*', 1, 'd'],
+                        ['otai', 'mysql', '*', 1, 'd']
                         ])
 df.to_sql('sys_cfg_dataload', dr.db_conn, index=False, if_exists='replace')
 
@@ -19,6 +19,6 @@ df.to_sql('sys_cfg_dataload', dr.db_conn, index=False, if_exists='replace')
 ts = dt.datetime.today()
 
 df = DataFrame(columns=['source', 'dest', 'timestamp', 'files'],
-                  data=[['opera', 'mysql', ts, 'C:\sample\filename.xlsx'],
+                  data=[['opera', 'mysql', ts, 'C:/sample/filename.xlsx'],
                         ])
 df.to_sql('sys_log_dataload', dr.db_conn, index=False, if_exists='replace')
