@@ -6,30 +6,30 @@ from feh.datareader import OperaDataReader
 from feh.utils import get_files
 
 
-test_case = 'load_files'     ### TEST CASE!
+TEST_CASE = 'load_files'     ### TEST CASE!
 
-if test_case == 'has_exceeded_dataload_freq':
+if TEST_CASE == 'has_exceeded_dataload_freq':
     odr = OperaDataReader()
     print(odr.has_exceeded_dataload_freq('opera', 'mysql', 'Reservation Analytics 11Jul15 fwd 61 days.xlsx'))
 
 
-if test_case == 'log_dataload':
+if TEST_CASE == 'log_dataload':
     odr = OperaDataReader()
     odr.log_dataload('opera', 'mysql', 'Reservation Analytics 11Jul15 fwd 61 days.xlsx')
 
 
-if test_case == 'load_files':
+if TEST_CASE == 'load_files':
     odr = OperaDataReader()
     odr.load()
 
 
-if test_case == 'read_files':
+if TEST_CASE == 'read_files':
     odr = OperaDataReader()
     str_folder = odr.config['data_sources']['opera']['root_folder']
     str_fn = get_files(str_folder=str_folder, pattern='60 days.xlsx$', latest_only=True)
     odr.logger.info(f'Loading {str_fn}')
 
-if test_case == 'decorator':
+if TEST_CASE == 'decorator':
     odr = OperaDataReader()
     odr.test_decorator(4, 0)
 

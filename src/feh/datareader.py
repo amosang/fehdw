@@ -86,6 +86,32 @@ class DataReader(object):
         else:
             return False
 
+    def remove_log_dataload(self, source, dest, str_date, file=None):
+        """ Removes one or more data load log entries.
+        :param source:
+        :param dest:
+        :param str_date: Format: "YYYY-MM-DD". The date for which the log entries are to be deleted.
+        :param file: Optional. If not given, will delete all log entries for the key combination of source/dest/timestamp.
+        :return: None
+        """
+        if file is not None:
+            str_sql = """
+            DELETE FROM sys_log_dataload
+            WHERE source = '{}'
+            AND dest = '{}'
+            AND DATE(timestamp) = '{}'
+            AND file = '{}'
+            """.format(source, dest, str_date, file)
+        else:
+            str_sql = """
+            DELETE FROM sys_log_dataload
+            WHERE source = '{}'
+            AND dest = '{}'
+            AND DATE(timestamp) = '{}'
+            """.format(source, dest, str_date)
+
+        pd.io.sql.execute(str_sql, self.db_conn)
+
     # def read(self, str_filename):
     #     ''' Reads the filename/data source and saves the data frame as a class attribute.
     #     Each subclass is responsible for handling the idiosyncrasies of its respective data source.
@@ -164,10 +190,11 @@ class OperaDataReader(DataReader):
     def test_decorator(self, x, y):
         print(f'{x} divided by {y} is {x / y}')
 
+    @dec_err_handler()  # Logs unforeseen exceptions. Put here, so that the next file load will be unaffected if earlier one fails.
     def load_otb(self, pattern=None):
         """ Loads Opera OTB file which matches the pattern. There should only be 1 per day.
         :param pattern: Regular expression, to use for filtering file name.
-        :return:
+        :return: None
         """
         SOURCE = 'opera'
         DEST = 'mysql'
@@ -182,10 +209,11 @@ class OperaDataReader(DataReader):
             self.logger.error(str_err)
             raise Exception(str_err)
 
-        # Copy file to server first
+        # Copy file to server first. Rename files to add timestamp, because the incoming files ALWAYS have the same names, so will be overwritten.
+        str_fn = str_fn[:-5] + '-' + dt.datetime.strftime(dt.datetime.today(), '%Y%m%d_%H%M') + str_fn[-5:]
         str_fn_dst = os.path.join(self.config['global']['global_temp'], str_fn)
         shutil.copy(str_fn_with_path, str_fn_dst)
-        self.logger.info(f'Reading from {str_fn_with_path}, using local copy {str_fn_dst}')
+        self.logger.info(f'Reading file "{str_fn_with_path}". Local copy "{str_fn_dst}"')
 
         # READ THE FILES #
         df_reservation = pd.read_excel(str_fn_dst, sheet_name='Reservation', keep_default_na=False, na_values=[' '])
@@ -252,10 +280,11 @@ class OperaDataReader(DataReader):
         df_merge_nonrev['snapshot_dt'] = dt.datetime.today()
 
         # WRITE TO DATABASE #
-        self.logger.info('Writing to database.')
+        self.logger.info('Loading file contents to data warehouse.')
         if is_history_file:  # The History (aka: Actuals) file is processed slightly differently.
-            df_merge_nonrev.drop(labels=['snapshot_dt'], axis=1, inplace=True)
-            df_merge_rev.drop(labels=['snapshot_dt'], axis=1, inplace=True)
+            # Leave "snapshot_dt". It serves as a handle to extract wrongly loaded data, if any.
+            # df_merge_nonrev.drop(labels=['snapshot_dt'], axis=1, inplace=True)
+            # df_merge_rev.drop(labels=['snapshot_dt'], axis=1, inplace=True)
             df_merge_nonrev.to_sql('stg_op_act_nonrev', self.db_conn, index=False, if_exists='append')
             df_merge_rev.to_sql('stg_op_act_rev', self.db_conn, index=False, if_exists='append')
         else:  # The other 2 files "60" and "61".
@@ -276,5 +305,5 @@ class OperaDataReader(DataReader):
         """
         self.load_otb(pattern='60 days.xlsx$')  # OTB 0-60 days onwards. Currently always picks the last modified file with this file name.
         self.load_otb(pattern='61 days.xlsx$')  # OTB 61 days onwards.
-        self.load_otb(pattern='History.xlsx$')  # History / Actuals
+        self.load_otb(pattern='History.xlsx$')  # History (aka: Actuals)
 
