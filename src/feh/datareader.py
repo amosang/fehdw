@@ -2,8 +2,10 @@ import datetime as dt
 import functools
 import pandas as pd
 import os
+import io
 import logging
 import shutil
+import requests
 import sqlalchemy
 from configobj import ConfigObj
 from pandas import DataFrame
@@ -35,7 +37,7 @@ class DataReader(object):
         """ For logging data loads. Timestamp used is current time.
         :param source: data source system (eg: 'opera').
         :param dest: data dest system (eg: 'mysql').
-        :param file: Filename. To log each filename (don't include the path).
+        :param file: Filename. To log each filename (don't include the path). "file" can also be the API type (eg: rates).
         :return:
         """
         str_sql = """INSERT INTO sys_log_dataload (source, dest, timestamp, file) VALUES ('{}', '{}', '{}', '{}')
@@ -149,7 +151,7 @@ class DataReader(object):
 
 
 class OperaDataReader(DataReader):
-    """ For reading Opera files, which are output by Vision (on SQ's laptop), then copied to SFTP server.
+    """ For reading Opera files, which are output by Vision (run on SQ's laptop), then copied to SFTP server.
     Files:
         - (DONE) Reservation Analytics 11Jul15 fwd 60 days.xlsx
         - (DONE) Reservation Analytics 11Jul15 fwd 61 days.xlsx
@@ -159,7 +161,6 @@ class OperaDataReader(DataReader):
         - (ON HOLD. NOT REALLY USED) Reservation Analytics 20 Jul15 Fwd Cancellations.xlsx
     """
     df_data = DataFrame()  # Instance attribute which holds the data read in, if any.
-    # self.logger -> instance variable.
 
     def __init__(self):
         super().__init__()
@@ -193,6 +194,7 @@ class OperaDataReader(DataReader):
     @dec_err_handler()  # Logs unforeseen exceptions. Put here, so that the next file load will be unaffected if earlier one fails.
     def load_otb(self, pattern=None):
         """ Loads Opera OTB file which matches the pattern. There should only be 1 per day.
+        Also used to load History/Actuals file, because it has a similar format.
         :param pattern: Regular expression, to use for filtering file name.
         :return: None
         """
@@ -307,3 +309,193 @@ class OperaDataReader(DataReader):
         self.load_otb(pattern='61 days.xlsx$')  # OTB 61 days onwards.
         self.load_otb(pattern='History.xlsx$')  # History (aka: Actuals)
 
+class OTAIDataReader(DataReader):
+    """ Class for interfacing with the OTA Insight API data source.
+    """
+    def __init__(self):
+        super().__init__()
+
+        # LOGGING #
+        self.logger = logging.getLogger('otai_datareader')
+        if self.logger.hasHandlers():  # Clear existing handlers, else will have duplicate logging messages.
+            self.logger.handlers.clear()
+        # Create the handler for the main logger
+        str_fn_logger = os.path.join(self.config['global']['global_root_folder'], self.config['data_sources']['otai']['logfile'])
+        fh_logger = logging.FileHandler(str_fn_logger)
+        str_format = '[%(asctime)s] - [%(levelname)s] - %(message)s'
+        fh_logger.setFormatter(logging.Formatter(str_format))
+        self.logger.addHandler(fh_logger)  # Add the handler to the base logger
+        self.logger.setLevel(logging.INFO)  # By default, logging will start at 'WARNING' unless we tell it otherwise.
+
+        # SET GLOBAL PARAMETERS #
+        self.API_TOKEN = self.config['data_sources']['otai']['token']
+        self.BASE_URL = self.config['data_sources']['otai']['base_url']
+
+        # BUFFER HotelIDs and CompsetID INTO MEMORY #
+        str_sql = """SELECT hotel_id, hotel_name, comp_id, comp_name FROM stg_otai_hotels WHERE hotel_category = 'hotel'"""
+        df = pd.read_sql(str_sql, self.db_conn)  # Read HotelIDs/CompsetIDs into buffer for future querying.
+        if len(df) != 0:
+            self.df_hotels = df
+        else:  # Make API call only if there's no data. More resilient.
+            self.load_hotels()
+            df = pd.read_sql(str_sql, self.db_conn)
+            self.df_hotels = df
+
+    def __del__(self):
+        super().__del__()
+
+        # Logging. Close all file handlers to release the lock on the open files.
+        handlers = self.logger.handlers[:]  # https://stackoverflow.com/questions/15435652/python-does-not-release-filehandles-to-logfile
+        for handler in handlers:
+            handler.close()
+            self.logger.removeHandler(handler)
+
+    def load_hotels(self):
+        """ Loads Hotels and Compset IDs to data warehouse. We need the IDs for further queries (eg: rates).
+        We should not have to call this frequently. Perhaps can periodically refresh, to avoid API calls.
+        """
+        res = requests.get(self.BASE_URL + 'hotels', params={'token': self.API_TOKEN, 'format': 'csv'})  # Better to use requests module. Can check for "requests.ok" -> HTTP 200.
+        df_hotels = pd.read_csv(io.StringIO(res.content.decode('utf-8')))
+        df_hotels.columns = ['hotel_id', 'hotel_name', 'hotel_stars', 'comp_id', 'comp_name', 'comp_stars', 'compset_id', 'compset_name']
+
+        # New column. Label the dataset with known Hotels; remainder are deemed to be SRs.
+        l_hotelid = [25002, 25105, 25106, 25107, 25109, 25119, 25167, 296976, 359549, 613872, 1663218]  # 11 hotels
+        df_hotels['hotel_category'] = 'sr'  # default value.
+        df_hotels['hotel_category'][df_hotels['hotel_id'].isin(l_hotelid)] = 'hotel'
+
+        df_hotels.to_sql('stg_otai_hotels', self.db_conn, index=False, if_exists='replace')
+
+    def get_rates_hotel(self, str_hotel_id=None, format='csv', ota='bookingdotcom'):
+        # Defaults: los: 1, persons:2, mealType: nofilter (lowest), shopLength: 90 (max: 365), changeDays: None (max: 3 values, max: 30 days), compsetIds=1
+        # Not using changeDays (we will calculate it ourselves).
+        params = {'token': self.API_TOKEN,
+                  'format': format,
+                  'hotelId': str_hotel_id,  # parameter names are case sensitive.
+                  'ota': ota
+                  }
+        res = requests.get(self.BASE_URL + 'rates', params=params)
+
+        if res.status_code == 200:  # HTTP 200
+            df = pd.read_csv(io.StringIO(res.content.decode('utf-8')))
+            df['ArrivalDate'] = pd.to_datetime(df['ArrivalDate'])
+            df['ExtractDateTime'] = pd.to_datetime(df['ExtractDateTime'])
+            return df
+        elif res.status_code == 429:  # 429 Too Many Requests. API calls are rate-limited to 120 requests/min per token.
+            str_err = 'Hotel Rates: HTTP 429 Too Many Requests'
+            self.logger.error(str_err)
+            raise Exception(str_err)
+
+    def load_rates(self):
+        SOURCE = 'otai'
+        DEST = 'mysql'
+        FILE = 'rates'
+        # Check using str_fn if file has already been loaded before. If yes, terminate processing.
+        if self.has_exceeded_dataload_freq(source=SOURCE, dest=DEST, file=FILE):
+            str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {FILE}'
+            self.logger.error(str_err)
+            raise Exception(str_err)
+
+        df_all = DataFrame()  # accumulator
+
+        self.logger.info('Hotel Rates: Reading from API')
+        for hotel_id in self.df_hotels['hotel_id']:
+            df = self.get_rates_hotel(str_hotel_id=str(hotel_id))
+            df_all = df_all.append(df, ignore_index=True)
+
+        self.logger.info('Hotel Rates: Loading to data warehouse')
+        df_all['snapshot_dt'] = dt.datetime.today()  # Add a timestamp when the data was loaded.
+        df_all.to_sql('stg_otai_rates', self.db_conn, index=False, if_exists='append')
+
+        # LOG DATALOAD #
+        self.logger.info('Hotel Rates: Logged data load activity to system log table.')
+        self.log_dataload(source='otai', dest='mysql', file='rates')
+
+    def load(self):
+        """ Loads data from a related cluster of data sources.
+        """
+        self.load_rates()
+
+
+class FWKDataReader(DataReader):
+    """ For reading FWK files from SFTP server.
+    Files:
+    - FWK_PROJ_29JAN2018.csv
+    - FWK_29JAN2018_SCREEN1.csv
+    """
+    def __init__(self):
+        super().__init__()
+
+        # LOGGING #
+        self.logger = logging.getLogger('fwk_datareader')
+        if self.logger.hasHandlers():  # Clear existing handlers, else will have duplicate logging messages.
+            self.logger.handlers.clear()
+        # Create the handler for the main logger
+        str_fn_logger = os.path.join(self.config['global']['global_root_folder'], self.config['data_sources']['fwk']['logfile'])
+        fh_logger = logging.FileHandler(str_fn_logger)
+        str_format = '[%(asctime)s] - [%(levelname)s] - %(message)s'
+        fh_logger.setFormatter(logging.Formatter(str_format))
+        self.logger.addHandler(fh_logger)  # Add the handler to the base logger
+        self.logger.setLevel(logging.INFO)  # By default, logging will start at 'WARNING' unless we tell it otherwise.
+
+    def __del__(self):
+        super().__del__()
+
+        # Logging. Close all file handlers to release the lock on the open files.
+        handlers = self.logger.handlers[:]  # https://stackoverflow.com/questions/15435652/python-does-not-release-filehandles-to-logfile
+        for handler in handlers:
+            handler.close()
+            self.logger.removeHandler(handler)
+
+    @dec_err_handler()  # Logs unforeseen exceptions. Put here, so that the next file load will be unaffected if earlier one fails.
+    def load_projected_and_otb(self, pattern=None, type=None):
+        """ Loads FWK Projected filename which matches the given pattern. There should only be 1 per day.
+        Also used to load FWK OTB file, because it has a similar format.
+        :param pattern: Regular expression, to use for filtering file name.
+        :return: None
+        """
+        SOURCE = 'fwk'
+        DEST = 'mysql'
+
+        str_folder = self.config['data_sources']['fwk']['root_folder']
+        str_fn_with_path, str_fn = get_files(str_folder=str_folder, pattern=pattern, latest_only=True)
+
+        # Check using str_fn if file has already been loaded before. If yes, terminate processing.
+        if self.has_exceeded_dataload_freq(source=SOURCE, dest=DEST, file=str_fn):
+            str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {str_fn}'
+            self.logger.error(str_err)
+            raise Exception(str_err)
+
+        # Copy file to server first. Incoming file names already have timestamp in them.
+        str_fn_dst = os.path.join(self.config['global']['global_temp'], str_fn)
+        shutil.copy(str_fn_with_path, str_fn_dst)
+        self.logger.info(f'Reading file "{str_fn_with_path}". Local copy "{str_fn_dst}"')
+
+        # READ THE FILES #
+        df = pd.read_csv(str_fn_dst)
+        df = df.iloc[:, :-1]  # Drop the last column. Blank.
+
+        # Typecasting
+        df['year'] = df['year'].astype(str)
+        df['periodFrom'] = pd.to_datetime(df['periodFrom'], format='%d/%m/%Y')
+        df['periodTo'] = pd.to_datetime(df['periodTo'], format='%d/%m/%Y')
+        df['snapshot_dt'] = dt.datetime.today()  # Add timestamp as handle.
+
+        self.logger.info('Loading file contents to data warehouse.')
+        if type == 'projected':
+            df.to_sql('stg_fwk_proj', self.db_conn, index=False, if_exists='append')
+        elif type == 'otb':
+            df.to_sql('stg_fwk_otb', self.db_conn, index=False, if_exists='append')
+
+        # LOG DATALOAD #
+        self.logger.info('Logged data load activity to system log table.')
+        self.log_dataload('fwk', 'mysql', str_fn)
+
+        # TODO Uncomment this line when system has stabilized, to delete temp files.
+        #Remove the temp file copy.
+        #os.remove(str_fn_dst)
+
+    def load(self):
+        """ Loads data from a related cluster of data sources.
+        """
+        self.load_projected_and_otb(pattern='^FWK_PROJ.+csv$', type='projected')  # eg: FWK_PROJ_29JAN2018.csv
+        self.load_projected_and_otb(pattern='^FWK.+SCREEN1.csv$', type='otb')  # eg: FWK_29JAN2018_SCREEN1.csv

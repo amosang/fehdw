@@ -1,3 +1,4 @@
+requests
 configobj
 xlrd
 pandas

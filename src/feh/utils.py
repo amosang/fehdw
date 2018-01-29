@@ -57,7 +57,7 @@ def get_latest_file(str_folder=None, pattern=None):
         str_fn_curr = os.path.join(str_folder, file)
         dt_curr = dt.datetime.fromtimestamp(os.path.getmtime(str_fn_curr))
 
-        if dt_prev == None:
+        if dt_prev is None:
             dt_prev = dt_curr
             str_fn_prev = str_fn_curr
         else:
@@ -69,7 +69,6 @@ def get_latest_file(str_folder=None, pattern=None):
 
 def get_files(str_folder=None, pattern=None, latest_only=False):
     """ Given a directory name, return all full filenames that exist there, and which match the pattern. Can search for latest filename only.
-
     :param str_folder: Directory to search for files.
     :param pattern: A regex expression, to filter the list of files.
     :param latest_only: True, if you want to get the latest filename only.
