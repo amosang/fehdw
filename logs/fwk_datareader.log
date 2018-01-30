@@ -1,6 +1,0 @@
-[2018-01-30 03:00:01,524] - [INFO] - Reading file "//10.0.2.251/fesftp/FWK\FWK_PROJ_30JAN2018.csv". Local copy "C:\fehdw\temp\FWK_PROJ_30JAN2018.csv"
-[2018-01-30 03:00:02,400] - [INFO] - Loading file contents to data warehouse.
-[2018-01-30 03:00:08,462] - [INFO] - Logged data load activity to system log table.
-[2018-01-30 03:00:08,748] - [INFO] - Reading file "//10.0.2.251/fesftp/FWK\FWK_30JAN2018_SCREEN1.csv". Local copy "C:\fehdw\temp\FWK_30JAN2018_SCREEN1.csv"
-[2018-01-30 03:00:10,462] - [INFO] - Loading file contents to data warehouse.
-[2018-01-30 03:00:22,663] - [INFO] - Logged data load activity to system log table.
