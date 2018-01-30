@@ -5,7 +5,7 @@
 # Data Access Window. Because SAS server has jobs which MOVE the files, there is a specific agreed data window within
 # which to copy the files.
 ###################
-from feh.datareader import OperaDataReader, OTAIDataReader, FWKDataReader
+from feh.datareader import OperaDataReader, OTAIDataReader, FWKDataReader, EzrmsDataReader
 import datetime as dt
 
 TIME_NOW = dt.datetime.now().time()  # Jobs to run within specific time windows
@@ -28,7 +28,10 @@ if dt.time(6, 30) <= TIME_NOW < dt.time(7):
     otai_dr = OTAIDataReader()
     otai_dr.load()
 
-# Rategain #
-# Data Access Window: 0230-0400 hrs
+# EzRMS #
+# Data Access Window: After 0930 hrs. Avoid simultaneous run with the other one.
+if dt.time(9, 30) <= TIME_NOW < dt.time(10):
+    ezrms_dr = EzrmsDataReader()
+    ezrms_dr.load()
 
 

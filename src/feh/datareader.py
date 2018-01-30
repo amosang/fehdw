@@ -1,7 +1,10 @@
 import datetime as dt
+import time
 import functools
 import pandas as pd
 import os
+import sys
+import re
 import io
 import logging
 import shutil
@@ -9,7 +12,7 @@ import requests
 import sqlalchemy
 from configobj import ConfigObj
 from pandas import DataFrame
-from feh.utils import dec_err_handler, get_files
+from feh.utils import dec_err_handler, get_files, MaxDataLoadException
 
 
 class DataReader(object):
@@ -27,6 +30,39 @@ class DataReader(object):
 
     def __del__(self):
         self.db_conn.close()
+
+    def _init_logger(self, logger_name, source_name):
+        """ Initialize self.logger for DataReader sub-classes, with 2 file handlers (1 for source, 1 for global log).
+        :param logger_name: Unique name for logger class. Format: "<source_name>_datareader".
+        :param source_name: Unique name for each data source. Comes from CONF file ("source_name").
+        :return: NA
+        """
+        self.logger = logging.getLogger(logger_name)
+        if self.logger.hasHandlers():  # Clear existing handlers, else will have duplicate logging messages.
+            self.logger.handlers.clear()
+        # Create the handler for the main logger
+        str_fn_logger = os.path.join(self.config['global']['global_root_folder'], self.config['data_sources']['ezrms']['logfile'])
+        fh_logger = logging.FileHandler(str_fn_logger)
+        str_fn_logger_global = os.path.join(self.config['global']['global_root_folder'], self.config['global']['global_log'])
+        fh_logger_global = logging.FileHandler(str_fn_logger_global)
+
+        str_format = '[%(asctime)s]-[%(levelname)s]- %(message)s'
+        str_format_global = f'[%(asctime)s]-[%(levelname)s]-[{source_name}] %(message)s'
+        fh_logger.setFormatter(logging.Formatter(str_format))
+        fh_logger_global.setFormatter(logging.Formatter(str_format_global))
+        self.logger.addHandler(fh_logger)  # Add handler.
+        self.logger.addHandler(fh_logger_global)  # Add global handler.
+        self.logger.setLevel(logging.INFO)  # By default, logging will start at 'WARNING' unless we tell it otherwise.
+
+    def _free_logger(self):
+        """ Frees up all file handlers. Method is to be called on __del__().
+        :return:
+        """
+        # Logging. Close all file handlers to release the lock on the open files.
+        handlers = self.logger.handlers[:]  # https://stackoverflow.com/questions/15435652/python-does-not-release-filehandles-to-logfile
+        for handler in handlers:
+            handler.close()
+            self.logger.removeHandler(handler)
 
     @classmethod
     def print_cfg(cls):
@@ -114,42 +150,6 @@ class DataReader(object):
 
         pd.io.sql.execute(str_sql, self.db_conn)
 
-    # def read(self, str_filename):
-    #     ''' Reads the filename/data source and saves the data frame as a class attribute.
-    #     Each subclass is responsible for handling the idiosyncrasies of its respective data source.
-    #     :param str_filename:
-    #     :return: DataFrame
-    #     '''
-    #     raise NotImplementedError
-
-    # def read_all(self, str_dir):
-    #     """ Given a directory name, read all the files (of a certain type) in that directory.
-    #
-    #     Results are saved as a class attribute.
-    #     :return: DataFrame
-    #     """
-    #     raise NotImplementedError
-
-    # def to_excel(self, filename):
-    #     """ Writes the df_data DataFrame contents to Excel.
-    #
-    #     Reference: https://stackoverflow.com/questions/29463274/simulate-autofit-column-in-xslxwriter; http://xlsxwriter.readthedocs.io/example_pandas_column_formats.html,
-    #     """
-    #     # Create a Pandas Excel writer using XlsxWriter as the engine.
-    #     writer = pd.ExcelWriter(filename, engine='xlsxwriter')
-    #     self.df_data.to_excel(writer, index=False)  # Creates the Worksheet='Sheet1'.
-    #
-    #     # Set column widths to be same length as column names (so that will display column names) #
-    #     # Get the xlsxwriter worksheet object.
-    #     worksheet = writer.sheets['Sheet1']
-    #
-    #     l_col_lengths = [len(x) for x in self.df_data.columns]
-    #     for i, width in enumerate(l_col_lengths):
-    #         worksheet.set_column(i, i, width)
-    #     writer.save()
-    #     writer.close()
-
-
 class OperaDataReader(DataReader):
     """ For reading Opera files, which are output by Vision (run on SQ's laptop), then copied to SFTP server.
     Files:
@@ -160,36 +160,14 @@ class OperaDataReader(DataReader):
         - (ON HOLD. NOT REALLY USED) CAG.xlsx
         - (ON HOLD. NOT REALLY USED) Reservation Analytics 20 Jul15 Fwd Cancellations.xlsx
     """
-    df_data = DataFrame()  # Instance attribute which holds the data read in, if any.
-
     def __init__(self):
         super().__init__()
-
-        # LOGGING #
-        self.logger = logging.getLogger('opera_datareader')
-        if self.logger.hasHandlers():  # Clear existing handlers, else will have duplicate logging messages.
-            self.logger.handlers.clear()
-        # Create the handler for the main logger
-        str_fn_logger = os.path.join(self.config['global']['global_root_folder'], self.config['data_sources']['opera']['logfile'])
-        fh_logger = logging.FileHandler(str_fn_logger)
-        str_format = '[%(asctime)s] - [%(levelname)s] - %(message)s'
-        fh_logger.setFormatter(logging.Formatter(str_format))
-        self.logger.addHandler(fh_logger)  # Add the handler to the base logger
-        self.logger.setLevel(logging.INFO)  # By default, logging will start at 'WARNING' unless we tell it otherwise.
+        self.SOURCE_NAME = self.config['data_sources']['opera']['source_name']
+        self._init_logger(logger_name=self.SOURCE_NAME + '_datareader', source_name=self.SOURCE_NAME)
 
     def __del__(self):
         super().__del__()
-
-        # Logging. Close all file handlers to release the lock on the open files.
-        handlers = self.logger.handlers[:]  # https://stackoverflow.com/questions/15435652/python-does-not-release-filehandles-to-logfile
-        for handler in handlers:
-            handler.close()
-            self.logger.removeHandler(handler)
-
-    # TODO Remove this test code.
-    @dec_err_handler(retries=3)
-    def test_decorator(self, x, y):
-        print(f'{x} divided by {y} is {x / y}')
+        self._free_logger()
 
     @dec_err_handler()  # Logs unforeseen exceptions. Put here, so that the next file load will be unaffected if earlier one fails.
     def load_otb(self, pattern=None):
@@ -198,7 +176,7 @@ class OperaDataReader(DataReader):
         :param pattern: Regular expression, to use for filtering file name.
         :return: None
         """
-        SOURCE = 'opera'
+        SOURCE = self.SOURCE_NAME  # 'opera'
         DEST = 'mysql'
         is_history_file = 'History' in pattern
 
@@ -208,8 +186,7 @@ class OperaDataReader(DataReader):
         # Check using str_fn if file has already been loaded before. If yes, terminate processing.
         if self.has_exceeded_dataload_freq(source=SOURCE, dest=DEST, file=str_fn):
             str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {str_fn}'
-            self.logger.error(str_err)
-            raise Exception(str_err)
+            raise MaxDataLoadException(str_err)
 
         # Copy file to server first. Rename files to add timestamp, because the incoming files ALWAYS have the same names, so will be overwritten.
         str_fn = str_fn[:-5] + '-' + dt.datetime.strftime(dt.datetime.today(), '%Y%m%d_%H%M') + str_fn[-5:]
@@ -314,18 +291,8 @@ class OTAIDataReader(DataReader):
     """
     def __init__(self):
         super().__init__()
-
-        # LOGGING #
-        self.logger = logging.getLogger('otai_datareader')
-        if self.logger.hasHandlers():  # Clear existing handlers, else will have duplicate logging messages.
-            self.logger.handlers.clear()
-        # Create the handler for the main logger
-        str_fn_logger = os.path.join(self.config['global']['global_root_folder'], self.config['data_sources']['otai']['logfile'])
-        fh_logger = logging.FileHandler(str_fn_logger)
-        str_format = '[%(asctime)s] - [%(levelname)s] - %(message)s'
-        fh_logger.setFormatter(logging.Formatter(str_format))
-        self.logger.addHandler(fh_logger)  # Add the handler to the base logger
-        self.logger.setLevel(logging.INFO)  # By default, logging will start at 'WARNING' unless we tell it otherwise.
+        self.SOURCE_NAME = self.config['data_sources']['otai']['source_name']
+        self._init_logger(logger_name=self.SOURCE_NAME + '_datareader', source_name=self.SOURCE_NAME)
 
         # SET GLOBAL PARAMETERS #
         self.API_TOKEN = self.config['data_sources']['otai']['token']
@@ -339,16 +306,11 @@ class OTAIDataReader(DataReader):
         else:  # Make API call only if there's no data. More resilient.
             self.load_hotels()
             df = pd.read_sql(str_sql, self.db_conn)
-            self.df_hotels = df
+            self.df_hotels = df  # Class attribute.
 
     def __del__(self):
         super().__del__()
-
-        # Logging. Close all file handlers to release the lock on the open files.
-        handlers = self.logger.handlers[:]  # https://stackoverflow.com/questions/15435652/python-does-not-release-filehandles-to-logfile
-        for handler in handlers:
-            handler.close()
-            self.logger.removeHandler(handler)
+        self._free_logger()
 
     def load_hotels(self):
         """ Loads Hotels and Compset IDs to data warehouse. We need the IDs for further queries (eg: rates).
@@ -382,18 +344,16 @@ class OTAIDataReader(DataReader):
             return df
         elif res.status_code == 429:  # 429 Too Many Requests. API calls are rate-limited to 120 requests/min per token.
             str_err = 'Hotel Rates: HTTP 429 Too Many Requests'
-            self.logger.error(str_err)
             raise Exception(str_err)
 
     def load_rates(self):
-        SOURCE = 'otai'
+        SOURCE = self.SOURCE_NAME  #'otai'
         DEST = 'mysql'
         FILE = 'rates'
         # Check using str_fn if file has already been loaded before. If yes, terminate processing.
         if self.has_exceeded_dataload_freq(source=SOURCE, dest=DEST, file=FILE):
             str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {FILE}'
-            self.logger.error(str_err)
-            raise Exception(str_err)
+            raise MaxDataLoadException(str_err)
 
         df_all = DataFrame()  # accumulator
 
@@ -419,32 +379,17 @@ class OTAIDataReader(DataReader):
 class FWKDataReader(DataReader):
     """ For reading FWK files from SFTP server.
     Files:
-    - FWK_PROJ_29JAN2018.csv
-    - FWK_29JAN2018_SCREEN1.csv
+    - (DONE) FWK_PROJ_29JAN2018.csv
+    - (DONE) FWK_29JAN2018_SCREEN1.csv
     """
     def __init__(self):
         super().__init__()
-
-        # LOGGING #
-        self.logger = logging.getLogger('fwk_datareader')
-        if self.logger.hasHandlers():  # Clear existing handlers, else will have duplicate logging messages.
-            self.logger.handlers.clear()
-        # Create the handler for the main logger
-        str_fn_logger = os.path.join(self.config['global']['global_root_folder'], self.config['data_sources']['fwk']['logfile'])
-        fh_logger = logging.FileHandler(str_fn_logger)
-        str_format = '[%(asctime)s] - [%(levelname)s] - %(message)s'
-        fh_logger.setFormatter(logging.Formatter(str_format))
-        self.logger.addHandler(fh_logger)  # Add the handler to the base logger
-        self.logger.setLevel(logging.INFO)  # By default, logging will start at 'WARNING' unless we tell it otherwise.
+        self.SOURCE_NAME = self.config['data_sources']['fwk']['source_name']
+        self._init_logger(logger_name=self.SOURCE_NAME + '_datareader', source_name=self.SOURCE_NAME)
 
     def __del__(self):
         super().__del__()
-
-        # Logging. Close all file handlers to release the lock on the open files.
-        handlers = self.logger.handlers[:]  # https://stackoverflow.com/questions/15435652/python-does-not-release-filehandles-to-logfile
-        for handler in handlers:
-            handler.close()
-            self.logger.removeHandler(handler)
+        self._free_logger()
 
     @dec_err_handler()  # Logs unforeseen exceptions. Put here, so that the next file load will be unaffected if earlier one fails.
     def load_projected_and_otb(self, pattern=None, type=None):
@@ -453,7 +398,7 @@ class FWKDataReader(DataReader):
         :param pattern: Regular expression, to use for filtering file name.
         :return: None
         """
-        SOURCE = 'fwk'
+        SOURCE = self.SOURCE_NAME  #'fwk'
         DEST = 'mysql'
 
         str_folder = self.config['data_sources']['fwk']['root_folder']
@@ -462,8 +407,7 @@ class FWKDataReader(DataReader):
         # Check using str_fn if file has already been loaded before. If yes, terminate processing.
         if self.has_exceeded_dataload_freq(source=SOURCE, dest=DEST, file=str_fn):
             str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {str_fn}'
-            self.logger.error(str_err)
-            raise Exception(str_err)
+            raise MaxDataLoadException(str_err)
 
         # Copy file to server first. Incoming file names already have timestamp in them.
         str_fn_dst = os.path.join(self.config['global']['global_temp'], str_fn)
@@ -499,3 +443,113 @@ class FWKDataReader(DataReader):
         """
         self.load_projected_and_otb(pattern='^FWK_PROJ.+csv$', type='projected')  # eg: FWK_PROJ_29JAN2018.csv
         self.load_projected_and_otb(pattern='^FWK.+SCREEN1.csv$', type='otb')  # eg: FWK_29JAN2018_SCREEN1.csv
+
+class EzrmsDataReader(DataReader):
+    """ For scrapping EzRMS Forecast report from EzRMS website.
+    """
+    def __init__(self):
+        super().__init__()
+        self.SOURCE_NAME = self.config['data_sources']['ezrms']['source_name']
+        self._init_logger(logger_name=self.SOURCE_NAME + '_datareader', source_name=self.SOURCE_NAME)
+
+    def __del__(self):
+        super().__del__()
+        self._free_logger()
+
+    @dec_err_handler(retries=3)
+    def load_forecast(self):
+        """ Download and load the Forecast TSV file. Transforms the data set from wide to long as well.
+        Note: If the layout of the Forecast TSV file changes (eg: due to addition of new hotels), the code to read the
+        source file needs to change too. The database table schema however, is already in long form and can continue as-is.
+
+        Important: hotel_code = 'ALL' is persisted into the table as well! Remember to exclude when doing aggregations.
+        """
+        from selenium import webdriver
+        from selenium.common.exceptions import NoSuchElementException
+
+        SOURCE = self.SOURCE_NAME  # 'ezrms'
+        DEST = 'mysql'
+        FILE = 'forecast'
+
+        # Check using str_fn if file has already been loaded before. If yes, terminate processing.
+        if self.has_exceeded_dataload_freq(source=SOURCE, dest=DEST, file=FILE):
+            str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {FILE}'
+            raise MaxDataLoadException(str_err)
+
+        self.logger.info('Initiating Chrome webdriver and logging in to EzRMS')
+        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], 'chromedriver_2.34.exe')
+        driver = webdriver.Chrome(executable_path=str_fn_chromedriver)  # NOTE: Check for presence of 'options!'.
+        driver.get('https://bw8.ezrms.infor.com/ezmingle.isp')
+        driver.switch_to.frame('Infor Generic Application')
+        driver.switch_to.frame('main')
+
+        input_email = driver.find_element_by_xpath('//*[@id="email"]')
+        input_email.send_keys(self.config['data_sources']['ezrms']['userid'])
+        input_password = driver.find_element_by_xpath('//*[@id="password"]')
+        input_password.send_keys(self.config['data_sources']['ezrms']['password'])
+        input_password.submit()  # Walks up the tree until it finds the enclosing Form, and submits that. http://selenium-python.readthedocs.io/navigating.html
+
+        # DOWNLOAD TSV, READ THE DATA #
+        self.logger.info('Downloading Forecast TSV file')
+        driver.get('https://bw8.ezrms.infor.com/fav.isp?favcat=User&favgroup=2&favid=76459&favname=Regional+Forecast+Analysis-+Big+data&favsubcat=amosang%40fareast.com.sg&period=16')
+        driver.switch_to.frame('main')
+        t = driver.find_elements_by_class_name('ezhiddenblock')[3]  # Thru trial-and-error. It's the third block
+
+        # A N-digit string, eg: "117475". Done this way because this string changes with each session!
+        match = re.search('\d+(?=\w+)', t.get_attribute('id'))  # Searching for some digits followed by some word characters.
+        if match:  # ie: There's a match
+            str_id = match.group(0)
+            str_xpath = '//*[@id="group_ID{}"]/tbody/tr/td/div/table/tbody/tr/td[2]/table/tbody/tr[1]/td/span/img'.format(str_id)
+        else:
+            raise Exception('Unable to determine str_xpath for the "3-dots" button')  # Handled by decorator.
+
+        try:
+            driver.find_element_by_xpath(str_xpath).click()  # 3 vertical dots icon
+        except NoSuchElementException:
+            raise Exception('NoSuchElementException encountered when trying to download Forecast TSV file')
+
+        driver.switch_to.frame('ezpopupselectwindow')
+        driver.find_element_by_xpath('/html/body/table/tbody/tr[3]/td').click()  # Export to TSV. Apparently clicking on the img works, even though there's no on-click event on it.
+        time.sleep(8)  # The TSV file downloads asynchronously in a separate process. We need the file to be present before continuing!
+        str_dl_folder = os.path.join(os.getenv('USERPROFILE'), 'Downloads')  # eg: 'C:/Users/feh_admin/Downloads'
+        str_fn_with_path, str_fn = get_files(str_folder=str_dl_folder, pattern='table.tsv$', latest_only=True)
+
+        self.logger.info('Using as Forecast file: {}'.format(str_fn))
+        df_forecast = pd.read_table(str_fn_with_path, header=None, skiprows=2, skipfooter=7, engine='python')
+
+        # READING AND TRANSFORMING THE TSV FILE #
+        # Typecasting and other clean ups.
+        df_forecast[0] = pd.to_datetime(df_forecast[0])
+        df_forecast.iloc[:, 14:] = df_forecast.iloc[:, 14:].apply(lambda x: x.str.rstrip('%').astype(
+            'float') / 100)  # Convert percentage string to float. Processing 1 Series at a time, ie: column-by-column.
+
+        df_forecast.columns = ['DATE', 'DOW', 'OCC_ACH', 'OCC_CVH', 'OCC_GLH', 'OCC_OHS', 'OCC_OPH', 'OCC_TES',
+                               'OCC_TQH', 'OCC_EVH', 'OCC_RHS',
+                               'OCC_OHD', 'OCC_OKL', 'OCC_ALL', 'P_ACH', 'P_CVH', 'P_GLH', 'P_OHS', 'P_OPH', 'P_TES',
+                               'P_TQH', 'P_EVH',
+                               'P_RHS', 'P_OHD', 'P_OKL', 'P_ALL']
+
+        df_forecast['DATE'] = pd.to_datetime(df_forecast['DATE'])
+        df_forecast.drop(labels='DOW', axis=1, inplace=True)
+
+        df = pd.wide_to_long(df_forecast, ['OCC_', 'P_'], j='hotel_code', i='DATE', suffix='.+').reset_index()
+        df.columns = ['date', 'hotel_code', 'occ_rooms', 'occ_percent']
+        df['snapshot_dt'] = dt.datetime.today()
+        df_forecast = df
+
+        self.logger.info('Writing to database.')
+        df_forecast.to_sql('stg_ezrms_forecast', self.db_conn, index=False, if_exists='append')
+
+        # LOG DATALOAD #
+        self.logger.info('Logged data load activity to system log table.')
+        self.log_dataload('ezrms', 'mysql', FILE)
+
+        driver.close()  # Close the browser
+        os.remove(str_fn_with_path)  # Delete the TSV file.
+
+    def load(self):
+        """ Loads data from a related cluster of data sources.
+        :return:
+        """
+        self.load_forecast()
+

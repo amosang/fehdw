@@ -2,11 +2,15 @@ import pandas as pd
 import os
 import re
 import datetime as dt
-from feh.datareader import OperaDataReader, OTAIDataReader, FWKDataReader
+from feh.datareader import OperaDataReader, OTAIDataReader, FWKDataReader, EzrmsDataReader
 from feh.utils import get_files
 
 
-TEST_CASE = 'load_files'     ### TEST CASE!
+TEST_CASE = 'ezrms_load_files'     ### TEST CASE!
+if TEST_CASE == 'ezrms_load_files':
+    ezrms_dr = EzrmsDataReader()
+    #ezrms_dr.remove_log_dataload('ezrms', 'mysql', str_date='2018-01-30')
+    ezrms_dr.load()
 
 if TEST_CASE == 'load_files':
     fwk_dr = FWKDataReader()

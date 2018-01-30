@@ -3,6 +3,11 @@ import logging
 import os
 import re
 import datetime as dt
+import time
+
+
+class MaxDataLoadException(Exception):
+    pass
 
 
 def dec_err_handler(retries=0):
@@ -26,16 +31,19 @@ def dec_err_handler(retries=0):
                     f(*args, **kwargs)
                     #print('No exception encountered')
                     break  # So you don't run f() multiple times!
+                except MaxDataLoadException as ex:
+                    logger.error(ex)
+                    break  # Do not retry multiple times, if problem was due to this Exception.
                 except Exception as ex:
                     # To only log exceptions.
                     #print('Exception: ' + str(ex))
                     if i > 0:
                         logger.info(f'[RETRYING] {f.__name__}: {i}/{retries}')
+                        time.sleep(2 ** i)  # Exponential backoff. Pause processing for an increasing number of seconds, with each error.
                     logger.error(ex)
 
         wrapped_err_handler.__name__ = f.__name__  # Nicety. Rename the error handler function name to that of the wrapped function.
         return wrapped_err_handler
-
     return wrap
 
 
