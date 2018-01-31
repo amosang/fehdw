@@ -1,10 +1,12 @@
+import pandas as pd
 import sys
 import logging
 import os
 import re
 import datetime as dt
 import time
-
+import zipfile
+import feh.datareader  # careful to circular imports!
 
 class MaxDataLoadException(Exception):
     pass
@@ -80,7 +82,7 @@ def get_files(str_folder=None, pattern=None, latest_only=False):
     :param str_folder: Directory to search for files.
     :param pattern: A regex expression, to filter the list of files.
     :param latest_only: True, if you want to get the latest filename only.
-    :return: Returns a full filename if latest_only=True. Otherwise, returns a list of full filenames.
+    :return: Returns a tuple of (<full filename>, <filename>) if latest_only=True. Otherwise, returns a list of tuples of (<full filename>, <filename>).
     """
     _, _, l_files = next(os.walk(str_folder))  # First, always get all files in the dir.
 
@@ -89,7 +91,45 @@ def get_files(str_folder=None, pattern=None, latest_only=False):
         if pattern is None:  # Return all files in the directory
             return l_files
         else:  # Return only files which match pattern.
-            return [f for f in l_files if re.search(pattern, f)]
+            return [(os.path.join(str_folder, fn), fn) for fn in l_files if re.search(pattern, fn)]
     else:
-        return get_latest_file(str_folder=str_folder, pattern=pattern)  # Note: The function will return 2 values!
+        return get_latest_file(str_folder=str_folder, pattern=pattern)  # Note: The function will return a 2-values tuple!
 
+
+def archive_logs(truncate=False):
+    """ Archives the logs into a ZIP file, with current datetime in the filename. Existing *.log files all truncated (reinitialized).
+    :param truncate: If True, will truncate existing log files.
+    :return: NA
+    """
+    dr = feh.datareader.DataReader()
+    str_log_dir = os.path.join(dr.config['global']['global_root_folder'], 'logs')
+    str_log_archive_dir = os.path.join(dr.config['global']['global_root_folder'], 'logs', 'archive')
+    str_fn_zip = 'log_'+dt.datetime.strftime(dt.datetime.today(), format='%Y%m%d_%H%M')+'.zip'
+    str_fn_zip_full = os.path.join(str_log_archive_dir, str_fn_zip)
+
+    l_files = get_files(str_folder=str_log_dir, pattern='.log$')  # Take only *.log files.
+
+    # ZIP AND ARCHIVE THE LOG FILES #
+    if len(l_files):
+        with zipfile.ZipFile(str_fn_zip_full, 'w') as f_zip:  # f_zip will close itself, given the "with" construct.
+            for (str_fn_full, str_fn) in l_files:
+                f_zip.write(filename=str_fn_full, arcname=str_fn)  # Add file to ZIP archive.
+
+    # TRUNCATE ALL EXISTING LOG FILES #
+    if truncate:
+        for (str_fn_full, str_fn) in l_files:
+            open(str_fn_full, 'w').close()
+
+
+def db_truncate_tables():
+    """ Truncate all tables in the list below.
+    """
+    dr = feh.datareader.DataReader()
+    dr._init_logger(logger_name='global')  # Global log only.
+
+    l_tabs = ['stg_ezrms_forecast', 'stg_fwk_otb', 'stg_fwk_proj', 'stg_op_act_nonrev', 'stg_op_act_rev',
+              'stg_op_otb_nonrev', 'stg_op_otb_rev', 'stg_otai_rates']
+    for tab in l_tabs:
+        str_sql = f"TRUNCATE {tab};"
+        pd.io.sql.execute(str_sql, dr.db_conn)
+        dr.logger.info(f'Truncated database table: {tab}')

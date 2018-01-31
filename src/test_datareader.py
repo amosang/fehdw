@@ -2,14 +2,21 @@ import pandas as pd
 import os
 import re
 import datetime as dt
-from feh.datareader import OperaDataReader, OTAIDataReader, FWKDataReader, EzrmsDataReader
-from feh.utils import get_files
+from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataReader, EzrmsDataReader
+from feh.utils import *
 
 
-TEST_CASE = 'ezrms_load_files'     ### TEST CASE!
+TEST_CASE = 'reset'     ### TEST CASE!
+
+if TEST_CASE == 'reset':
+    # Delete all table entries, and clear out all logs!
+    db_truncate_tables()
+    archive_logs(truncate=True)
+
+
 if TEST_CASE == 'ezrms_load_files':
     ezrms_dr = EzrmsDataReader()
-    #ezrms_dr.remove_log_dataload('ezrms', 'mysql', str_date='2018-01-30')
+    ezrms_dr.remove_log_dataload('ezrms', 'mysql', str_date='2018-01-31')
     ezrms_dr.load()
 
 if TEST_CASE == 'load_files':

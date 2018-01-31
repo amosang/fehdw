@@ -31,28 +31,43 @@ class DataReader(object):
     def __del__(self):
         self.db_conn.close()
 
-    def _init_logger(self, logger_name, source_name):
-        """ Initialize self.logger for DataReader sub-classes, with 2 file handlers (1 for source, 1 for global log).
-        :param logger_name: Unique name for logger class. Format: "<source_name>_datareader".
-        :param source_name: Unique name for each data source. Comes from CONF file ("source_name").
+    def _init_logger(self, logger_name, source_name=None):
+        """ Initialize self.logger for DataReader sub-classes
+        If source_name = None, means that we only want to log to global.log.
+            Usage: "dr._init_logger(logger_name='global')"
+        If source_name is an actual data source name (in fehdw.conf), then 2 file handlers will be created.
+
+        :param logger_name: Unique name used solely in Logger class as id. Format to send in: "<source_name>_datareader".
+        :param source_name: Unique name for each data source. Comes from CONF file ("source_name"). eg: "opera", "ezrms".
         :return: NA
         """
-        self.logger = logging.getLogger(logger_name)
+        self.logger = logging.getLogger(logger_name)  # A specific id for the Logger class use only.
+        self.logger.setLevel(logging.INFO)  # By default, logging will start at 'WARNING' unless we tell it otherwise.
+
         if self.logger.hasHandlers():  # Clear existing handlers, else will have duplicate logging messages.
             self.logger.handlers.clear()
-        # Create the handler for the main logger
-        str_fn_logger = os.path.join(self.config['global']['global_root_folder'], self.config['data_sources']['ezrms']['logfile'])
-        fh_logger = logging.FileHandler(str_fn_logger)
+
+        # LOG TO GLOBAL LOG FILE #
         str_fn_logger_global = os.path.join(self.config['global']['global_root_folder'], self.config['global']['global_log'])
         fh_logger_global = logging.FileHandler(str_fn_logger_global)
 
-        str_format = '[%(asctime)s]-[%(levelname)s]- %(message)s'
-        str_format_global = f'[%(asctime)s]-[%(levelname)s]-[{source_name}] %(message)s'
-        fh_logger.setFormatter(logging.Formatter(str_format))
+        if source_name:  # if not None, means it's True, and that there is a data source.
+            str_format_global = f'[%(asctime)s]-[%(levelname)s]-[{source_name}] %(message)s'
+        else:  # Is None. Means global log only.
+            str_format_global = f'[%(asctime)s]-[%(levelname)s]- %(message)s'
+
         fh_logger_global.setFormatter(logging.Formatter(str_format_global))
-        self.logger.addHandler(fh_logger)  # Add handler.
         self.logger.addHandler(fh_logger_global)  # Add global handler.
-        self.logger.setLevel(logging.INFO)  # By default, logging will start at 'WARNING' unless we tell it otherwise.
+
+        if source_name:  # Log to data source specific file, only if a source_name is given.
+            # LOG TO <source_name> LOG FILE #
+            str_fn_logger = os.path.join(self.config['global']['global_root_folder'],
+                                         self.config['data_sources'][source_name]['logfile'])
+            fh_logger = logging.FileHandler(str_fn_logger)
+            str_format = '[%(asctime)s]-[%(levelname)s]- %(message)s'
+            fh_logger.setFormatter(logging.Formatter(str_format))
+            self.logger.addHandler(fh_logger)  # Add handler.
+
 
     def _free_logger(self):
         """ Frees up all file handlers. Method is to be called on __del__().
@@ -257,6 +272,15 @@ class OperaDataReader(DataReader):
         l_dfs = [df_reservation, df_allotment, df_arr_depart, df_sales, df_guest_profile, df_no_of_guest]
         df_merge_nonrev = functools.reduce(lambda left, right: pd.merge(left, right, on=['confirmation_no', 'resort']), l_dfs)
         df_merge_nonrev['snapshot_dt'] = dt.datetime.today()
+
+        # Type conversions
+        df_merge_rev['business_dt'] = pd.to_datetime(df_merge_rev['business_dt'], format('%d/%m/%Y'))
+        df_merge_nonrev['gp_dob'] = pd.to_datetime(df_merge_nonrev['gp_dob'], format('%d/%m/%Y'))
+        df_merge_nonrev['res_reserv_date'] = pd.to_datetime(df_merge_nonrev['res_reserv_date'], format('%d/%m/%Y'))
+        df_merge_nonrev['res_cancel_date'] = pd.to_datetime(df_merge_nonrev['res_cancel_date'], format('%d/%m/%Y'))
+        df_merge_nonrev['res_business_date'] = pd.to_datetime(df_merge_nonrev['res_business_date'], format('%d/%m/%Y'))
+        df_merge_nonrev['arr_arrival_date'] = pd.to_datetime(df_merge_nonrev['arr_arrival_date'], format('%d/%m/%Y'))
+        df_merge_nonrev['arr_departure_date'] = pd.to_datetime(df_merge_nonrev['arr_departure_date'], format('%d/%m/%Y'))
 
         # WRITE TO DATABASE #
         self.logger.info('Loading file contents to data warehouse.')
@@ -492,6 +516,7 @@ class EzrmsDataReader(DataReader):
         # DOWNLOAD TSV, READ THE DATA #
         self.logger.info('Downloading Forecast TSV file')
         driver.get('https://bw8.ezrms.infor.com/fav.isp?favcat=User&favgroup=2&favid=76459&favname=Regional+Forecast+Analysis-+Big+data&favsubcat=amosang%40fareast.com.sg&period=16')
+        time.sleep(2)  # Just in case. The below statement *might* occur before the above statement completes, leading to error.
         driver.switch_to.frame('main')
         t = driver.find_elements_by_class_name('ezhiddenblock')[3]  # Thru trial-and-error. It's the third block
 
@@ -549,7 +574,6 @@ class EzrmsDataReader(DataReader):
 
     def load(self):
         """ Loads data from a related cluster of data sources.
-        :return:
         """
-        self.load_forecast()
+        self.load_forecast()  # EzRMS's forecast of what the occupancies. Tightly coupled with the EzRMS report used.
 
