@@ -6,7 +6,7 @@ from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataR
 from feh.utils import *
 
 
-TEST_CASE = 'reset'     ### TEST CASE!
+TEST_CASE = 'opera_load_files'     ### TEST CASE!
 
 if TEST_CASE == 'reset':
     # Delete all table entries, and clear out all logs!
@@ -14,9 +14,15 @@ if TEST_CASE == 'reset':
     archive_logs(truncate=True)
 
 
+if TEST_CASE == 'opera_load_files':
+    op_dr = OperaDataReader()
+    #op_dr.remove_log_dataload('opera', 'mysql', str_date='2018-02-01')
+    op_dr.load()
+
 if TEST_CASE == 'ezrms_load_files':
     ezrms_dr = EzrmsDataReader()
-    ezrms_dr.remove_log_dataload('ezrms', 'mysql', str_date='2018-01-31')
+    str_date = dt.datetime.strftime(dt.datetime.today(), format='%Y-%m-%d')  # Today
+    ezrms_dr.remove_log_dataload('ezrms', 'mysql', str_date=str_date)
     ezrms_dr.load()
 
 if TEST_CASE == 'load_files':

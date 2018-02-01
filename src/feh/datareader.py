@@ -54,7 +54,7 @@ class DataReader(object):
         if source_name:  # if not None, means it's True, and that there is a data source.
             str_format_global = f'[%(asctime)s]-[%(levelname)s]-[{source_name}] %(message)s'
         else:  # Is None. Means global log only.
-            str_format_global = f'[%(asctime)s]-[%(levelname)s]- %(message)s'
+            str_format_global = f'[%(asctime)s]-[%(levelname)s] %(message)s'
 
         fh_logger_global.setFormatter(logging.Formatter(str_format_global))
         self.logger.addHandler(fh_logger_global)  # Add global handler.
@@ -184,7 +184,7 @@ class OperaDataReader(DataReader):
         super().__del__()
         self._free_logger()
 
-    @dec_err_handler()  # Logs unforeseen exceptions. Put here, so that the next file load will be unaffected if earlier one fails.
+    @dec_err_handler(retries=0)  # Logs unforeseen exceptions. Put here, so that the next file load will be unaffected if earlier one fails.
     def load_otb(self, pattern=None):
         """ Loads Opera OTB file which matches the pattern. There should only be 1 per day.
         Also used to load History/Actuals file, because it has a similar format.
@@ -203,9 +203,10 @@ class OperaDataReader(DataReader):
             str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {str_fn}'
             raise MaxDataLoadException(str_err)
 
-        # Copy file to server first. Rename files to add timestamp, because the incoming files ALWAYS have the same names, so will be overwritten.
-        str_fn = str_fn[:-5] + '-' + dt.datetime.strftime(dt.datetime.today(), '%Y%m%d_%H%M') + str_fn[-5:]
-        str_fn_dst = os.path.join(self.config['global']['global_temp'], str_fn)
+        # Copy file to server first. Rename files to add timestamp, as incoming files ALWAYS have the same names, so will be overwritten.
+        # Leave str_fn untouched, because it is used later to log dataload activity to database.
+        str_fn_with_date = str_fn[:-5] + '-' + dt.datetime.strftime(dt.datetime.today(), '%Y%m%d_%H%M') + str_fn[-5:]
+        str_fn_dst = os.path.join(self.config['global']['global_temp'], str_fn_with_date)
         shutil.copy(str_fn_with_path, str_fn_dst)
         self.logger.info(f'Reading file "{str_fn_with_path}". Local copy "{str_fn_dst}"')
 
@@ -273,14 +274,17 @@ class OperaDataReader(DataReader):
         df_merge_nonrev = functools.reduce(lambda left, right: pd.merge(left, right, on=['confirmation_no', 'resort']), l_dfs)
         df_merge_nonrev['snapshot_dt'] = dt.datetime.today()
 
-        # Type conversions
-        df_merge_rev['business_dt'] = pd.to_datetime(df_merge_rev['business_dt'], format('%d/%m/%Y'))
-        df_merge_nonrev['gp_dob'] = pd.to_datetime(df_merge_nonrev['gp_dob'], format('%d/%m/%Y'))
-        df_merge_nonrev['res_reserv_date'] = pd.to_datetime(df_merge_nonrev['res_reserv_date'], format('%d/%m/%Y'))
-        df_merge_nonrev['res_cancel_date'] = pd.to_datetime(df_merge_nonrev['res_cancel_date'], format('%d/%m/%Y'))
-        df_merge_nonrev['res_business_date'] = pd.to_datetime(df_merge_nonrev['res_business_date'], format('%d/%m/%Y'))
-        df_merge_nonrev['arr_arrival_date'] = pd.to_datetime(df_merge_nonrev['arr_arrival_date'], format('%d/%m/%Y'))
-        df_merge_nonrev['arr_departure_date'] = pd.to_datetime(df_merge_nonrev['arr_departure_date'], format('%d/%m/%Y'))
+        # TYPE CONVERSIONS #
+        # errors='coerce' is needed sometimes because of presence of blanks (no dob given). Blanks will thus be converted to NaT.
+        # For such cases, no 'format' specified, because that causes every row to become NaT (dunno what's the format in Excel).
+        if is_history_file:  # Only the "History" file has this field.
+            df_merge_nonrev['res_business_date'] = pd.to_datetime(df_merge_nonrev['res_business_date'], format='%d/%m/%Y')
+        df_merge_nonrev['gp_dob'] = pd.to_datetime(df_merge_nonrev['gp_dob'], errors='coerce')
+        df_merge_nonrev['res_reserv_date'] = pd.to_datetime(df_merge_nonrev['res_reserv_date'], format='%d/%m/%Y')
+        df_merge_nonrev['res_cancel_date'] = pd.to_datetime(df_merge_nonrev['res_cancel_date'], errors='coerce')
+        df_merge_nonrev['arr_arrival_dt'] = pd.to_datetime(df_merge_nonrev['arr_arrival_dt'], format='%d/%m/%Y')
+        df_merge_nonrev['arr_departure_dt'] = pd.to_datetime(df_merge_nonrev['arr_departure_dt'], format='%d/%m/%Y')
+        df_merge_rev['business_dt'] = pd.to_datetime(df_merge_rev['business_dt'], format='%d/%m/%Y')
 
         # WRITE TO DATABASE #
         self.logger.info('Loading file contents to data warehouse.')
@@ -300,7 +304,7 @@ class OperaDataReader(DataReader):
 
         # TODO Uncomment this line when system has stabilized, to delete temp files.
         # Remove the temp file copy.
-        #os.remove(str_fn_dst)
+        #os.remove(str_fn_dst)  # Thought: Might want to keep the copied files, to re-create error situations.
 
     def load(self):
         """ Loads data from a related cluster of data sources.
@@ -309,6 +313,7 @@ class OperaDataReader(DataReader):
         self.load_otb(pattern='60 days.xlsx$')  # OTB 0-60 days onwards. Currently always picks the last modified file with this file name.
         self.load_otb(pattern='61 days.xlsx$')  # OTB 61 days onwards.
         self.load_otb(pattern='History.xlsx$')  # History (aka: Actuals)
+
 
 class OTAIDataReader(DataReader):
     """ Class for interfacing with the OTA Insight API data source.
@@ -323,7 +328,9 @@ class OTAIDataReader(DataReader):
         self.BASE_URL = self.config['data_sources']['otai']['base_url']
 
         # BUFFER HotelIDs and CompsetID INTO MEMORY #
-        str_sql = """SELECT hotel_id, hotel_name, comp_id, comp_name FROM stg_otai_hotels WHERE hotel_category = 'hotel'"""
+        str_sql = """
+        SELECT hotel_id, hotel_name, comp_id, comp_name FROM stg_otai_hotels WHERE hotel_category = 'hotel'
+        """
         df = pd.read_sql(str_sql, self.db_conn)  # Read HotelIDs/CompsetIDs into buffer for future querying.
         if len(df) != 0:
             self.df_hotels = df
@@ -467,6 +474,7 @@ class FWKDataReader(DataReader):
         """
         self.load_projected_and_otb(pattern='^FWK_PROJ.+csv$', type='projected')  # eg: FWK_PROJ_29JAN2018.csv
         self.load_projected_and_otb(pattern='^FWK.+SCREEN1.csv$', type='otb')  # eg: FWK_29JAN2018_SCREEN1.csv
+
 
 class EzrmsDataReader(DataReader):
     """ For scrapping EzRMS Forecast report from EzRMS website.
