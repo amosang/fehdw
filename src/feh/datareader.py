@@ -11,7 +11,7 @@ import shutil
 import requests
 import sqlalchemy
 from configobj import ConfigObj
-from pandas import DataFrame
+from pandas import DataFrame, Series
 from feh.utils import dec_err_handler, get_files, MaxDataLoadException
 
 
@@ -388,14 +388,19 @@ class OTAIDataReader(DataReader):
 
         df_all = DataFrame()  # accumulator
 
-        self.logger.info('Hotel Rates: Reading from API')
+        self.logger.info('Hotel Rates: Reading from API.')
         for hotel_id in self.df_hotels['hotel_id']:
             df = self.get_rates_hotel(str_hotel_id=str(hotel_id))
             df_all = df_all.append(df, ignore_index=True)
 
-        self.logger.info('Hotel Rates: Loading to data warehouse')
+        self.logger.info('Hotel Rates: Loading to data warehouse.')
         df_all['snapshot_dt'] = dt.datetime.today()  # Add a timestamp when the data was loaded.
         df_all.to_sql('stg_otai_rates', self.db_conn, index=False, if_exists='append')
+        # Write a tab-separated copy to SFTP server for ORCA1.
+        str_orca_fn = 'otai_' + dt.datetime.strftime(dt.datetime.today(), format='%Y%m%d') + '.tsv'  # format: "otai_YYYYMMDD.tsv"
+        str_orca_fp = os.path.join(self.config['data_sources']['otai']['ftp_folder'], str_orca_fn)
+        df_all.to_csv(str_orca_fp, sep='\t', index=False)
+        self.logger.info(f'Hotel Rates: Writing data to {str_orca_fp}')
 
         # LOG DATALOAD #
         self.logger.info('Hotel Rates: Logged data load activity to system log table.')

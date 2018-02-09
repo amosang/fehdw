@@ -6,7 +6,8 @@ import re
 import datetime as dt
 import time
 import zipfile
-import feh.datareader  # careful to circular imports!
+import feh.datareader  # careful to avoid circular imports!
+
 
 class MaxDataLoadException(Exception):
     pass

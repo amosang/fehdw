@@ -1,6 +1,6 @@
 ###################
-# Purpose: Windows Task Scheduler to call this file at certain intervals (eg: every 30 mins).
-# All data loading routines to be put here, for ease of maintenance. For errors, look up respective logs.
+# Purpose: Windows Task Scheduler to run this file at specific intervals (eg: every 30 mins). Working assumption = 30 mins.
+# All data loading routines to be put here in 1 place, for ease of maintenance. For errors, look up respective logs.
 
 # Data Access Window. Because SAS server has jobs which MOVE the files, there is a specific agreed data window within
 # which to copy the files.

@@ -6,10 +6,19 @@ from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataR
 from feh.utils import *
 
 
-TEST_CASE = 'opera_load_files'     ### TEST CASE!
+TEST_CASE = 'extract_otai_sample'     ### TEST CASE!
+
+if TEST_CASE == 'extract_otai_sample':
+    dr = DataReader()
+    str_sql = """
+    SELECT * FROM stg_otai_rates WHERE DATE_FORMAT(snapshot_dt, "%%Y-%%m-%%d") = '2018-02-09'
+    """
+    df = pd.read_sql(str_sql, dr.db_conn)
+    df.to_csv('C:/1/otai_20180209.tsv', sep='\t', index=False)
 
 if TEST_CASE == 'reset':
     # Delete all table entries, and clear out all logs!
+    print('TRUNCATING TABLES AND ARCHIVING LOGS')
     db_truncate_tables()
     archive_logs(truncate=True)
 
