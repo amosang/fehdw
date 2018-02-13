@@ -31,17 +31,17 @@ def dec_err_handler(retries=0):
 
             for i in range(retries + 1):  # First attempt 0 does not count as a retry.
                 try:
-                    f(*args, **kwargs)
-                    #print('No exception encountered')
+                    if i > 0:
+                        logger.info(f'[RETRYING] {f.__name__}: {i}/{retries}')  # Print number of retries, BEFORE running f() again.
+
+                    f(*args, **kwargs)  # Payload function.
                     break  # So you don't run f() multiple times!
                 except MaxDataLoadException as ex:
                     logger.error(ex)
                     break  # Do not retry multiple times, if problem was due to this Exception.
                 except Exception as ex:
                     # To only log exceptions.
-                    #print('Exception: ' + str(ex))
                     if i > 0:
-                        logger.info(f'[RETRYING] {f.__name__}: {i}/{retries}')
                         time.sleep(2 ** i)  # Exponential backoff. Pause processing for an increasing number of seconds, with each error.
                     logger.error(ex)
 
@@ -105,10 +105,10 @@ def archive_logs(truncate=False):
     dr = feh.datareader.DataReader()
     str_log_dir = os.path.join(dr.config['global']['global_root_folder'], 'logs')
     str_log_archive_dir = os.path.join(dr.config['global']['global_root_folder'], 'logs', 'archive')
-    str_fn_zip = 'log_'+dt.datetime.strftime(dt.datetime.today(), format='%Y%m%d_%H%M')+'.zip'
+    str_fn_zip = 'log_' + dt.datetime.strftime(dt.datetime.today(), format='%Y%m%d_%H%M') + '.zip'
     str_fn_zip_full = os.path.join(str_log_archive_dir, str_fn_zip)
 
-    l_files = get_files(str_folder=str_log_dir, pattern='.log$')  # Take only *.log files.
+    l_files = get_files(str_folder=str_log_dir, pattern='.log$')  # Take all *.log files.
 
     # ZIP AND ARCHIVE THE LOG FILES #
     if len(l_files):
@@ -123,7 +123,7 @@ def archive_logs(truncate=False):
 
 
 def db_truncate_tables():
-    """ Truncate all tables in the list below.
+    """ Truncate all tables specified in the list below.
     """
     dr = feh.datareader.DataReader()
     dr._init_logger(logger_name='global')  # Global log only.

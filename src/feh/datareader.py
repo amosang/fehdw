@@ -24,7 +24,7 @@ class DataReader(object):
         str_userid = self.config['data_sources']['mysql']['userid']
         str_password = self.config['data_sources']['mysql']['password']
         str_db = self.config['data_sources']['mysql']['db']
-        str_conn_mysql = f'mysql+pymysql://{str_userid}:{str_password}@{str_host}/{str_db}?charset=utf8'
+        str_conn_mysql = f'mysql+pymysql://{str_userid}:{str_password}@{str_host}/{str_db}?charset=utf8mb4'
         engine = sqlalchemy.create_engine(str_conn_mysql, echo=False)
         self.db_conn = engine.connect()
 
@@ -102,7 +102,7 @@ class DataReader(object):
         :param file: Filename. To log each filename (don't include the path).
         :return:
         """
-        # Get number of data loads within the same day (Key: source/dest/file).
+        # Get number of logged data loads already done within the same day (KEY: source/dest/file).
         str_sql = """
         SELECT * FROM sys_log_dataload
         WHERE source = '{}'
@@ -113,7 +113,7 @@ class DataReader(object):
         df = pd.read_sql(str_sql, self.db_conn)
         i_log_count = len(df)  # Number of existing log entries.
 
-        ###
+        # Check the policy table for how many data loads should be allowed.
         str_sql = """
         SELECT * FROM sys_cfg_dataload
         WHERE source = '{}'
@@ -306,6 +306,53 @@ class OperaDataReader(DataReader):
         # Remove the temp file copy.
         #os.remove(str_fn_dst)  # Thought: Might want to keep the copied files, to re-create error situations.
 
+    @dec_err_handler(retries=0)  # Logs unforeseen exceptions. Put here, so that the next file load will be unaffected if earlier one fails.
+    def load_cag(self, pattern=None):
+        """ Loads Opera CAG file which matches the pattern. There should only be 1 per day.
+        :param pattern: Regular expression, to use for filtering file name.
+        :return: None
+        """
+        SOURCE = self.SOURCE_NAME  # 'opera'
+        DEST = 'mysql'
+
+        str_folder = self.config['data_sources']['opera']['root_folder']
+        str_fn_with_path, str_fn = get_files(str_folder=str_folder, pattern=pattern, latest_only=True)
+
+        # Check using str_fn if file has already been loaded before. If yes, terminate processing.
+        if self.has_exceeded_dataload_freq(source=SOURCE, dest=DEST, file=str_fn):
+            str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {str_fn}'
+            raise MaxDataLoadException(str_err)
+
+        # Copy file to server first. Rename files to add timestamp, as incoming files ALWAYS have the same names, so will be overwritten.
+        # Leave str_fn untouched, because it is used later to log dataload activity to database.
+        str_fn_with_date = str_fn[:-5] + '-' + dt.datetime.strftime(dt.datetime.today(), '%Y%m%d_%H%M') + str_fn[-5:]  # Assumes a ".xlsx" file ext, hence 5 chars.
+        str_fn_dst = os.path.join(self.config['global']['global_temp'], str_fn_with_date)
+        shutil.copy(str_fn_with_path, str_fn_dst)
+        self.logger.info(f'Reading file "{str_fn_with_path}". Local copy "{str_fn_dst}"')
+
+        # READ THE FILES #
+        #df_reservation = pd.read_excel(str_fn_dst, sheet_name='Reservation', keep_default_na=False, na_values=[' '])
+
+        # Renaming columns manually. Assumes that source Excel files do not change column positions, or added/deleted columns!
+        #df_allotment.columns = ['confirmation_no', 'resort', 'allot_allot_book_cde', 'allot_allot_book_desc']
+
+        # TYPE CONVERSIONS #
+        # errors='coerce' is needed sometimes because of presence of blanks (no dob given). Blanks will thus be converted to NaT.
+        # For such cases, no 'format' specified, because that causes every row to become NaT (dunno what's the format in Excel).
+        #df_merge_rev['business_dt'] = pd.to_datetime(df_merge_rev['business_dt'], format='%d/%m/%Y')
+
+        # WRITE TO DATABASE #
+        self.logger.info('Loading file contents to data warehouse.')
+        #df_merge_nonrev.to_sql('stg_op_cag_*', self.db_conn, index=False, if_exists='append')
+
+        # LOG DATALOAD #
+        self.logger.info('Logged data load activity to system log table.')
+        self.log_dataload('opera', 'mysql', str_fn)
+
+        # TODO Uncomment this line when system has stabilized, to delete temp files.
+        # Remove the temp file copy.
+        #os.remove(str_fn_dst)  # Thought: Might want to keep the copied files, to re-create error situations.
+
     def load(self):
         """ Loads data from a related cluster of data sources.
         :return:
@@ -313,6 +360,7 @@ class OperaDataReader(DataReader):
         self.load_otb(pattern='60 days.xlsx$')  # OTB 0-60 days onwards. Currently always picks the last modified file with this file name.
         self.load_otb(pattern='61 days.xlsx$')  # OTB 61 days onwards.
         self.load_otb(pattern='History.xlsx$')  # History (aka: Actuals)
+        #self.load_otb(pattern='CAG.xlsx$')      # CAG (Corporate Groups Allocations)
 
 
 class OTAIDataReader(DataReader):
@@ -331,8 +379,14 @@ class OTAIDataReader(DataReader):
         str_sql = """
         SELECT hotel_id, hotel_name, comp_id, comp_name FROM stg_otai_hotels WHERE hotel_category = 'hotel'
         """
-        df = pd.read_sql(str_sql, self.db_conn)  # Read HotelIDs/CompsetIDs into buffer for future querying.
-        if len(df) != 0:
+        try:
+            df = pd.read_sql(str_sql, self.db_conn)  # Read HotelIDs/CompsetIDs into buffer for future querying.
+        except Exception:  # pymysql.err.InterfaceError thrown if table does not exist. Make API call only if there's no data. More resilient.
+            self.load_hotels()
+            df = pd.read_sql(str_sql, self.db_conn)
+            self.df_hotels = df  # Class attribute.
+
+        if len(df) != 0:  # Table might exist, but have no data (ie: truncated).
             self.df_hotels = df
         else:  # Make API call only if there's no data. More resilient.
             self.load_hotels()

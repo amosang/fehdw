@@ -6,7 +6,12 @@ from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataR
 from feh.utils import *
 
 
-TEST_CASE = 'extract_otai_sample'     ### TEST CASE!
+TEST_CASE = 'xxx'     ### TEST CASE!
+
+if TEST_CASE == 'load_otai_hotels':
+    otai_dr = OTAIDataReader()
+    otai_dr.load_hotels()
+
 
 if TEST_CASE == 'extract_otai_sample':
     dr = DataReader()
@@ -19,7 +24,7 @@ if TEST_CASE == 'extract_otai_sample':
 if TEST_CASE == 'reset':
     # Delete all table entries, and clear out all logs!
     print('TRUNCATING TABLES AND ARCHIVING LOGS')
-    db_truncate_tables()
+    #db_truncate_tables()
     archive_logs(truncate=True)
 
 
