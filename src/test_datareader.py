@@ -2,24 +2,25 @@ import pandas as pd
 import os
 import re
 import datetime as dt
-from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataReader, EzrmsDataReader
+from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataReader, EzrmsDataReader, EloquaB2CDataReader
 from feh.utils import *
 
 
-TEST_CASE = 'xxx'     ### TEST CASE!
+TEST_CASE = 'test_elq'     ### TEST CASE!
 
-if TEST_CASE == 'load_otai_hotels':
-    otai_dr = OTAIDataReader()
-    otai_dr.load_hotels()
+if TEST_CASE == 'test_elq':
+    elq_dr = EloquaB2CDataReader()
+    elq_dr.load_activity(str_act_type='EmailSend', str_dt_from='2017-01-01', str_dt_to='2018-01-01')
 
-
-if TEST_CASE == 'extract_otai_sample':
+if TEST_CASE == 'test_logger':
     dr = DataReader()
-    str_sql = """
-    SELECT * FROM stg_otai_rates WHERE DATE_FORMAT(snapshot_dt, "%%Y-%%m-%%d") = '2018-02-09'
-    """
-    df = pd.read_sql(str_sql, dr.db_conn)
-    df.to_csv('C:/1/otai_20180209.tsv', sep='\t', index=False)
+    dr.log_dataload('src', 'dest', 'abc.txt')   # sqlalchemy.exc.ProgrammingError:
+
+
+if TEST_CASE == 'test_otai':
+    otai_dr = OTAIDataReader()
+    otai_dr.load_rates()
+
 
 if TEST_CASE == 'reset':
     # Delete all table entries, and clear out all logs!

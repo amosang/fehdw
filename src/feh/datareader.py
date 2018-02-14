@@ -13,6 +13,8 @@ import sqlalchemy
 from configobj import ConfigObj
 from pandas import DataFrame, Series
 from feh.utils import dec_err_handler, get_files, MaxDataLoadException
+import pyeloqua
+from pyeloqua import Bulk
 
 
 class DataReader(object):
@@ -91,9 +93,19 @@ class DataReader(object):
         :param file: Filename. To log each filename (don't include the path). "file" can also be the API type (eg: rates).
         :return:
         """
-        str_sql = """INSERT INTO sys_log_dataload (source, dest, timestamp, file) VALUES ('{}', '{}', '{}', '{}')
-        """.format(source, dest, dt.datetime.now(), file)
-        pd.io.sql.execute(str_sql, self.db_conn)
+        try:
+            str_sql = """INSERT INTO sys_log_dataload (source, dest, timestamp, file) VALUES ('{}', '{}', '{}', '{}')
+            """.format(source, dest, dt.datetime.now(), file)
+            pd.io.sql.execute(str_sql, self.db_conn)
+        except Exception:  # sqlalchemy.exc.ProgrammingError
+            # If Exception, that can only mean that the table is not there. Create the table, and do again.
+            str_sql = """ CREATE TABLE `sys_log_dataload` (
+            `source` text, `dest` text, `file` text, `timestamp` datetime DEFAULT NULL) ENGINE = MyISAM;
+            """
+            pd.io.sql.execute(str_sql, self.db_conn)
+            str_sql = """INSERT INTO sys_log_dataload (source, dest, timestamp, file) VALUES ('{}', '{}', '{}', '{}')
+            """.format(source, dest, dt.datetime.now(), file)
+            pd.io.sql.execute(str_sql, self.db_conn)
 
     def has_exceeded_dataload_freq(self, source, dest, file):
         """ To call before loading any data source, to ensure that loading freq does not exceed maximum loads per day.
@@ -426,6 +438,7 @@ class OTAIDataReader(DataReader):
             df = pd.read_csv(io.StringIO(res.content.decode('utf-8')))
             df['ArrivalDate'] = pd.to_datetime(df['ArrivalDate'])
             df['ExtractDateTime'] = pd.to_datetime(df['ExtractDateTime'])
+            df['ota'] = ota  # include the OTA as well, as this does not form part of the data set from the API.
             return df
         elif res.status_code == 429:  # 429 Too Many Requests. API calls are rate-limited to 120 requests/min per token.
             str_err = 'Hotel Rates: HTTP 429 Too Many Requests'
@@ -450,11 +463,13 @@ class OTAIDataReader(DataReader):
         self.logger.info('Hotel Rates: Loading to data warehouse.')
         df_all['snapshot_dt'] = dt.datetime.today()  # Add a timestamp when the data was loaded.
         df_all.to_sql('stg_otai_rates', self.db_conn, index=False, if_exists='append')
+
         # Write a tab-separated copy to SFTP server for ORCA1.
-        str_orca_fn = 'otai_' + dt.datetime.strftime(dt.datetime.today(), format='%Y%m%d') + '.tsv'  # format: "otai_YYYYMMDD.tsv"
+        str_orca_fn = 'otai_' + dt.datetime.strftime(dt.datetime.today(), format='%Y%m%d') + '.csv'  # format: "otai_YYYYMMDD.tsv"
         str_orca_fp = os.path.join(self.config['data_sources']['otai']['ftp_folder'], str_orca_fn)
-        df_all.to_csv(str_orca_fp, sep='\t', index=False)
+        df_all['ota'].replace({'bookingdotcom': 'Booking.com'}, inplace=True)  # Legacy. ORCA1 side requested for 'Booking.com' string value.
         self.logger.info(f'Hotel Rates: Writing data to {str_orca_fp}')
+        df_all.to_csv(str_orca_fp, sep=',', index=False)
 
         # LOG DATALOAD #
         self.logger.info('Hotel Rates: Logged data load activity to system log table.')
@@ -644,3 +659,109 @@ class EzrmsDataReader(DataReader):
         """
         self.load_forecast()  # EzRMS's forecast of what the occupancies. Tightly coupled with the EzRMS report used.
 
+
+class EloquaB2CDataReader(DataReader):
+    def __init__(self):
+        super().__init__()
+        self.SOURCE_NAME = self.config['data_sources']['eloqua_b2c']['source_name']
+        self._init_logger(logger_name=self.SOURCE_NAME + '_datareader', source_name=self.SOURCE_NAME)
+
+        self.COMPANY = self.config['data_sources']['eloqua_b2c']['company']
+        self.USERID = self.config['data_sources']['eloqua_b2c']['userid']
+        self.PASSWORD = self.config['data_sources']['eloqua_b2c']['password']
+        self.bulk = Bulk(company=self.COMPANY, username=self.USERID, password=self.PASSWORD)
+
+    def __del__(self):
+        super().__del__()
+        self._free_logger()
+
+    def get_activity_data(self, str_act_type=None, start_date=None, end_date=None):
+        """
+        Given a valid Eloqua activity, retrieve the data from Eloqua, where ActivityDate is between start_date (inclusive) and end_date (exclusive).
+        :param str_act_type: Eloqua activity types. Valid options: EmailSend, EmailOpen, EmailClickthrough, Subscribe, Unsubscribe, Bounceback, FormSubmit, PageView, WebVisit.
+        :param start_date: datetime object representing the start_date of the selection.
+        :param end_date: datetime object representing the end date of the selection. Note that selection is EXCLUSIVE of end date itself!
+        :return: DataFrame object. Returns empty DataFrame if no data retrieved.
+        """
+        # Ensure all parameters are provided.
+        if str_act_type == None or start_date == None or end_date == None:
+            raise Exception('Please provide valid values for {} and {} and {} and {}'
+                            .format('bulk', str_act_type, start_date, end_date))
+
+        self.bulk.exports(elq_object='activities', act_type=str_act_type)
+        fields = self.bulk.get_fields(elq_object='activities', act_type=str_act_type)
+        self.bulk.add_fields(list(DataFrame(fields)['name']))
+
+        # bulk.filter_equal(field='ActivityType', value=str_act_type)  # Required for Activities
+        self.bulk.filter_date(field='ActivityDate', start=start_date, end=end_date)  # Non-inclusive of end date!
+        self.bulk.create_def('export_activities_' + str_act_type)  # send export info to Eloqua
+        self.bulk.sync()  # Move data to staging area in Eloqua.
+        df = DataFrame(self.bulk.get_export_data())  # Convert returned JSON values to DataFrame.
+
+        # Typecasting
+        df['ActivityDate'] = pd.to_datetime(df['ActivityDate'], errors='coerce')
+
+        if len(df) == 0:
+            return DataFrame()  # Returns empty DataFrame if no data. For use in concatenation.
+        else:
+            return df
+
+    def load_activity(self, str_act_type=None, str_dt_from=None, str_dt_to=None):
+        """
+        Calls get_activity_data() to iteratively (day-by-day) obtain all activity data, for the given date range.
+        This attempts to bypass the problem of Eloqua taking too long to return data, if the selection date range is too wide.
+        Reminder: The data is EXCLUSIVE of str_to_dt itself!
+        :param str_act_type:
+        :param str_dt_from:
+        :param str_dt_to:
+        :return: NA
+        """
+        # Typecasting strings to datetime.
+        dt_from = pd.to_datetime(str_dt_from)
+        dt_to = pd.to_datetime(str_dt_to)
+
+        if not dt_to > dt_from:
+            raise Exception('dt_to must be at least 1 day larger than dt_from. Eloqua API constraint.')
+
+        dt_ptr_from = dt_from
+        dt_ptr_to = dt_from + dt.timedelta(days=1)
+
+        while dt_ptr_to <= dt_to:
+            self.logger.info('Obtaining {} data for start_date={}, end_date={}'
+                             .format(str_act_type, str(dt_ptr_from.date()), str(dt_ptr_to.date())))
+            self.bulk.job['filters'] = []  # Clear filters (for ActivityDate and ActivityType). So won't duplicate and throw Eloqua API error.
+
+            df = self.get_activity_data(str_act_type, dt_ptr_from, dt_ptr_to)
+
+            str_db_tab_name = 'stg_elq_b2c_act_' + str_act_type.lower()  # Convention: Tab name will be derived from ActivityType.
+            # Ref => https: // docs.oracle.com / cloud / latest / marketingcs_gs / OMCAB / index.html  # Developers/BulkAPI/Reference/activity-fields.htm%3FTocPath%3DBulk%2520API%7CReference%7C_____7
+            # WRITE TO DB #
+            df.to_sql(name=str_db_tab_name, con=self.db_conn, if_exists='append', index=False)
+
+            dt_ptr_from = dt_ptr_to  # Increment dt_ptr_start_date by 1
+            dt_ptr_to += dt.timedelta(days=1)  # Increment dt_ptr_end_date by 1
+
+    def load_activity_bounceback(self, str_act_type=None, str_dt_from=None, str_dt_to=None):
+        """
+        Variant of load_activity(). There are few bouncebacks, so might be better to not call day-by-day.
+        :param str_act_type:
+        :param str_from_dt:
+        :param str_to_dt:
+        :return: NA
+        """
+        # Typecasting strings to datetime.
+        dt_from = pd.to_datetime(str_dt_from)
+        dt_to = pd.to_datetime(str_dt_to)
+
+        if not dt_to > dt_from:
+            raise Exception('dt_to must be at least 1 day larger than dt_from. Eloqua API constraint.')
+        self.logger.info('Obtaining {} data for start_date={}, end_date={}'
+                         .format(str_act_type, str(dt_from.date()), str(dt_to.date())))
+        self.bulk.job['filters'] = []  # Clear filters (for ActivityDate and ActivityType). So won't duplicate and throw Eloqua API error.
+        df = self.get_activity_data(str_act_type, dt_from, dt_to)  # Not for single day, but for a date range.
+        str_db_tab_name = 'stg_elq_b2c_act_' + str_act_type.lower()  # Convention: Tab name will be derived from ActivityType.
+        # WRITE TO DB #
+        df.to_sql(name=str_db_tab_name, con=self.db_conn, if_exists='append', index=False)
+
+    def load(self):
+        pass
