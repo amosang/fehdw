@@ -6,7 +6,7 @@ from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataR
 from feh.utils import *
 
 
-TEST_CASE = 'test_elq'     ### TEST CASE!
+TEST_CASE = 'test_otai'     ### TEST CASE!
 
 if TEST_CASE == 'test_elq':
     elq_dr = EloquaB2CDataReader()

@@ -389,7 +389,7 @@ class OTAIDataReader(DataReader):
 
         # BUFFER HotelIDs and CompsetID INTO MEMORY #
         str_sql = """
-        SELECT hotel_id, hotel_name, comp_id, comp_name FROM stg_otai_hotels WHERE hotel_category = 'hotel'
+        SELECT HotelID, HotelName, CompetitorID, CompetitorName FROM stg_otai_hotels WHERE hotel_category = 'hotel'
         """
         try:
             df = pd.read_sql(str_sql, self.db_conn)  # Read HotelIDs/CompsetIDs into buffer for future querying.
@@ -405,6 +405,9 @@ class OTAIDataReader(DataReader):
             df = pd.read_sql(str_sql, self.db_conn)
             self.df_hotels = df  # Class attribute.
 
+        # List of unique HotelIDs and CompetitorIDs. For use in future calls (eg: load_rates() ).
+        self.l_hotels_and_comp_ids = list(set(self.df_hotels['HotelID'].tolist() + self.df_hotels['CompetitorID'].tolist()))
+
     def __del__(self):
         super().__del__()
         self._free_logger()
@@ -415,12 +418,13 @@ class OTAIDataReader(DataReader):
         """
         res = requests.get(self.BASE_URL + 'hotels', params={'token': self.API_TOKEN, 'format': 'csv'})  # Better to use requests module. Can check for "requests.ok" -> HTTP 200.
         df_hotels = pd.read_csv(io.StringIO(res.content.decode('utf-8')))
-        df_hotels.columns = ['hotel_id', 'hotel_name', 'hotel_stars', 'comp_id', 'comp_name', 'comp_stars', 'compset_id', 'compset_name']
+        #df_hotels.columns = ['hotel_id', 'hotel_name', 'hotel_stars', 'comp_id', 'comp_name', 'comp_stars', 'compset_id', 'compset_name']
 
         # New column. Label the dataset with known Hotels; remainder are deemed to be SRs.
         l_hotelid = [25002, 25105, 25106, 25107, 25109, 25119, 25167, 296976, 359549, 613872, 1663218]  # 11 hotels
         df_hotels['hotel_category'] = 'sr'  # default value.
-        df_hotels['hotel_category'][df_hotels['hotel_id'].isin(l_hotelid)] = 'hotel'
+        df_hotels['hotel_category'][df_hotels['HotelID'].isin(l_hotelid)] = 'hotel'
+        df_hotels['snapshot_dt'] = dt.datetime.now()
 
         df_hotels.to_sql('stg_otai_hotels', self.db_conn, index=False, if_exists='replace')
 
@@ -444,6 +448,7 @@ class OTAIDataReader(DataReader):
             str_err = 'Hotel Rates: HTTP 429 Too Many Requests'
             raise Exception(str_err)
 
+    @dec_err_handler(retries=0)
     def load_rates(self):
         SOURCE = self.SOURCE_NAME  #'otai'
         DEST = 'mysql'
@@ -456,7 +461,7 @@ class OTAIDataReader(DataReader):
         df_all = DataFrame()  # accumulator
 
         self.logger.info('Hotel Rates: Reading from API.')
-        for hotel_id in self.df_hotels['hotel_id']:
+        for hotel_id in self.l_hotels_and_comp_ids:  # Get the Rates exactly ONCE for each HotelID. List has unique IDs.
             df = self.get_rates_hotel(str_hotel_id=str(hotel_id))
             df_all = df_all.append(df, ignore_index=True)
 
