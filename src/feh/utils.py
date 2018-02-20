@@ -33,17 +33,15 @@ def dec_err_handler(retries=0):
                 try:
                     if i > 0:
                         logger.info(f'[RETRYING] {f.__name__}: {i}/{retries}')  # Print number of retries, BEFORE running f() again.
-
-                    f(*args, **kwargs)  # Payload function.
+                    f(*args, **kwargs)  # PAYLOAD FUNCTION.
                     break  # So you don't run f() multiple times!
                 except MaxDataLoadException as ex:
                     logger.error(ex)
                     break  # Do not retry multiple times, if problem was due to this Exception.
                 except Exception as ex:
                     # To only log exceptions.
-                    if i > 0:
-                        time.sleep(2 ** i)  # Exponential backoff. Pause processing for an increasing number of seconds, with each error.
                     logger.error(ex)
+                    time.sleep(2 ** i)  # Exponential backoff. Pause processing for an increasing number of seconds, with each error.
 
         wrapped_err_handler.__name__ = f.__name__  # Nicety. Rename the error handler function name to that of the wrapped function.
         return wrapped_err_handler

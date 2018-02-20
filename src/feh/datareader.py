@@ -405,7 +405,7 @@ class OTAIDataReader(DataReader):
             df = pd.read_sql(str_sql, self.db_conn)
             self.df_hotels = df  # Class attribute.
 
-        # List of unique HotelIDs and CompetitorIDs. For use in future calls (eg: load_rates() ).
+        # List of unique HotelIDs and CompetitorIDs. For use in future calls (eg: self.load_rates() ).
         self.l_hotels_and_comp_ids = list(set(self.df_hotels['HotelID'].tolist() + self.df_hotels['CompetitorID'].tolist()))
 
     def __del__(self):
@@ -567,7 +567,7 @@ class EzrmsDataReader(DataReader):
         super().__del__()
         self._free_logger()
 
-    @dec_err_handler(retries=3)
+    @dec_err_handler(retries=5)
     def load_forecast(self):
         """ Download and load the Forecast TSV file. Transforms the data set from wide to long as well.
         Note: If the layout of the Forecast TSV file changes (eg: due to addition of new hotels), the code to read the
