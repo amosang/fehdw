@@ -36,7 +36,7 @@ def check_dataload_not_logged(t_timenow, conn):
     """
     df_sched = pd.read_sql(str_sql, conn)
 
-    if len(df_sched) > 0:
+    if len(df_sched) > 0:  # Iterate thru df_sched to see which source/dest/file rows fall within time_from-time_to range.
         for idx, row in df_sched.iterrows():
             time_from = row['time_from']
             time_to = row['time_to']
@@ -64,6 +64,9 @@ def check_dataload_not_logged(t_timenow, conn):
                     df_log = pd.read_sql(str_sql, conn)
 
                 if len(df_log) < 1:  # There should be at least 1 log entry for the day.
+                    # TODO: If there are N files for a source, to check for N files, not just 1 file. The difficulty is that 'file' value sometimes contains a variable (eg: date), for certain data sources!
+                    # Currently, if 1 out of 2 files from the SAME source to be loaded fails, the system will PASS this!
+                    # Alternatively, in scheduler_load_data.py, call each of the 3 Opera files one-by-one directly thru load_otb().
                     df_out = df_out.append(row, ignore_index=True)
 
     if len(df_out) > 0:
