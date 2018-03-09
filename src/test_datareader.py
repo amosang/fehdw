@@ -6,7 +6,13 @@ from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataR
 from feh.utils import *
 
 
-TEST_CASE = 'test_otai'     ### TEST CASE!
+TEST_CASE = 'test_op_cag'     ### TEST CASE!
+
+
+if TEST_CASE == 'test_op_cag':
+    op_dr = OperaDataReader()
+    op_dr.remove_log_dataload('opera', 'mysql', str_date='2018-02-01')
+    op_dr.load_cag(pattern='CAG.xlsx$')
 
 if TEST_CASE == 'test_elq':
     elq_dr = EloquaB2CDataReader()

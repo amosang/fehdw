@@ -17,6 +17,11 @@ from feh.utils import dec_err_handler, get_files, MaxDataLoadException, split_da
 
 
 class DataRunner(object):
+    """ This general class contains the methods to do with processing data from the raw state into an intermediate state, to place in data marts.
+    Data mart tables will have a "dm1" prefix. The "1" signifies that this is level 1 of processing. There may be subsequent levels.
+    This class itself contains only generic methods such as those for logging. It is meant to be inherited.
+    Its sub-classes will contain the methods which contain the actual logic for further data processing.
+    """
     config = ConfigObj('C:/fehdw/src/fehdw.conf')
 
     def __init__(self):
@@ -95,7 +100,55 @@ class DataRunner(object):
             return False
 
 
-class DemandForecastDataRunner(DataRunner):
+class OperaOTBDataRunner(DataRunner):
+    """ For generating the Opera OTB with allocation (from CAG file).
+    This allows us to have the anticipated number of rm_nts and revenue figures in one place.
+    This tells us how many rooms we have booked and the associated revenue (with level of uncertainty determined by the booking_status_code field).
+    Writes the result into a data mart for subsequent visualization.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.APP_NAME = self.config['datarunner']['opera_otb']['app_name']
+        self._init_logger(logger_name=self.APP_NAME + '_datareader', app_name=self.APP_NAME)
+
+    def __del__(self):
+        super().__del__()
+        self._free_logger()
+
+    def proc_opera_otb_with_allot(self, dt_date):
+        str_date_from, str_date_to = split_date(dt_date)
+
+        str_sql = f"""
+        SELECT A.*, B.business_dt, B.rev_marketcode, B.rev_ratecode, B.rev_sourcecode, B.rev_sourcename, B.rev_eff_rate_amt, B.rev_proj_room_nts,
+        B.rev_rmrev_extax, B.rev_food_rev_inctax, B.rev_oth_rev_inctax, B.rev_hurdle, B.rev_hurdle_override, B.rev_restriction_override
+        FROM
+            (SELECT confirmation_no, resort, res_reserv_date, res_reserv_status, res_bkdroom_ct_lbl, res_roomty_lbl, res_cancel_date, res_pay_method, res_credcard_ty,
+            allot_allot_book_cde, allot_allot_book_desc, arr_arrival_dt, arr_arrival_time, arr_departure_dt, arr_departure_time,
+            sale_comp_name, sale_zip_code, sale_sales_rep, sale_sales_rep_code, sale_industry_code, sale_trav_agent_name, sale_sales_rep1, sale_sales_rep_code1,
+            sale_all_owner, gp_guest_ctry_cde, gp_nationality, gp_origin_code, gp_guest_firstname, gp_guest_lastname, gp_guest_title_code, gp_spcl_req_desc, gp_email,
+            gp_dob, gp_vip_status_desc, ng_adults, ng_children, ng_extra_beds, ng_cribs, 'DEF_N' AS 'booking_status_code'
+            FROM stg_op_otb_nonrev
+            WHERE snapshot_dt >= '{str_date_from}' AND snapshot_dt < '{str_date_to}') AS A
+                INNER JOIN
+            (SELECT confirmation_no, resort, business_dt, rev_marketcode, rev_ratecode, rev_sourcecode, rev_sourcename, rev_eff_rate_amt, rev_proj_room_nts,
+            rev_rmrev_extax, rev_food_rev_inctax, rev_oth_rev_inctax, rev_hurdle, rev_hurdle_override, rev_restriction_override
+            FROM stg_op_otb_rev
+            WHERE snapshot_dt >= '{str_date_from}' AND snapshot_dt < '{str_date_to}' ) AS B
+                ON A.confirmation_no = B.confirmation_no AND A.resort = B.resort
+        """
+        df_otb = pd.read_sql(str_sql, self.conn_fehdw)
+
+
+    def run(self):
+        pass
+
+
+class OccForecastDataRunner(DataRunner):
+    """ For generating the Occupancy forecast, based on FWK's predicted demand (rm_nts).
+    Loads the model's coefficients, and uses these to compute the predicted Market Occupancy.
+    Writes the result into a data mart for subsequent visualization.
+    """
     def __init__(self):
         super().__init__()
         self.APP_NAME = self.config['datarunner']['demand_forecast']['app_name']
@@ -105,44 +158,111 @@ class DemandForecastDataRunner(DataRunner):
         super().__del__()
         self._free_logger()
 
-    def _get_fwk_proj(self, dt_date=None):
-        """ Get FWK's projected demand for per snapshot per stay_date. We loaded this earlier.
-        :param dt_date: If provided, will get snapshot_dt = dt_date only.
+    def proc_ezrms_forecast(self, if_exists, dt_date=dt.datetime.today()):
+        """ Processes the EzRMS data into a form that is suitable for visualization.
+        This is very similar to proc_occ_forecasts(), but was created so as not to have a dependency on having FWK data,
+        ie: EzRMS forecasts can be processed independently, with a data mart of its own.
+        :param dt_date: If dt_date=='all', takes all dates. Else defaults to current date only.
         :return: DataFrame
         """
-        if dt_date is None:
-            # Read whole table. One-time use only.
-            str_sql = """
-            SELECT snapshot_dt, periodFrom AS stay_date, SUM(value) AS count FROM stg_fwk_proj
+        if dt_date == 'all':
+            # Read whole table. One-time use only (likely during migration/setup).
+            str_sql_ezrms = """
+            SELECT A.*, B.room_inventory FROM 
+            (SELECT snapshot_dt, date AS stay_date, hotel_code, occ_rooms AS rm_nts_ezrms FROM stg_ezrms_forecast) AS A
+            INNER JOIN 
+            (SELECT old_code AS hotel_code, room_inventory FROM cfg_map_hotel_sr
+            WHERE hotel_or_sr = 'Hotel') AS B
+            ON A.hotel_code = B.hotel_code
+            """
+        else:
+            # Get ONLY 1 snapshot_dt worth of data. For use on a daily basis.
+            str_date_from, str_date_to = split_date(dt_date)
+
+            str_sql_ezrms = """
+            SELECT A.*, B.room_inventory FROM 
+            (SELECT snapshot_dt, date AS stay_date, hotel_code, occ_rooms AS rm_nts_ezrms FROM stg_ezrms_forecast
+            WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}' ) AS A
+            INNER JOIN 
+            (SELECT old_code AS hotel_code, room_inventory FROM cfg_map_hotel_sr
+            WHERE hotel_or_sr = 'Hotel') AS B            
+            ON A.hotel_code = B.hotel_code
+            """.format(str_date_from, str_date_to)
+
+        # GET EZRMS FORECAST #
+        df_ezrms = pd.read_sql(str_sql_ezrms, self.conn_fehdw)
+        df_ezrms['snapshot_dt'] = pd.to_datetime(df_ezrms['snapshot_dt'].dt.date)  # Keep only the date part.
+
+        df_ezrms.to_sql('dm1_occ_forecast_ezrms', self.conn_fehdw, index=False, if_exists=if_exists)
+
+        self.logger.info('[proc_ezrms_forecast] Completed successfully for Period: {}'.format(str(dt_date)))
+        return df_ezrms
+
+    def proc_occ_forecasts(self, if_exists, dt_date=dt.datetime.today()):
+        """ Use FWK's predicted demand to calculate the Forecasted Mkt Occ Rate.
+        Merges the result with EzRMS Occ Forecast. Writes to data mart level 1.
+        :param if_exists:
+        :param dt_date: If dt_date=='all', takes all dates. Else defaults to current date only.
+        :return: DataFrame
+        """
+        # GET FWK DATA; CALC MKT OCC FORECAST BASED ON FWK DATA #
+        if dt_date == 'all':
+            # Read whole table. One-time use only (likely during migration/setup).
+            str_sql_fwk = """
+            SELECT snapshot_dt, periodFrom AS stay_date, SUM(value) AS rm_nts FROM stg_fwk_proj
             WHERE classification in ('lengthOfStay1', 'lengthOfStay2', 'lengthOfStay3', 'lengthOfStay4')
             GROUP BY snapshot_dt, stay_date
             ORDER BY snapshot_dt, stay_date
             """
+
+            str_sql_ezrms = """
+            SELECT A.*, B.room_inventory FROM 
+            (SELECT snapshot_dt, date AS stay_date, hotel_code, occ_rooms AS rm_nts FROM stg_ezrms_forecast) AS A
+            INNER JOIN 
+            (SELECT old_code AS hotel_code, room_inventory FROM cfg_map_hotel_sr
+            WHERE hotel_or_sr = 'Hotel') AS B
+            ON A.hotel_code = B.hotel_code
+            """
         else:
-            # Get only 1 snapshot_dt worth of data.
+            # Get ONLY 1 snapshot_dt worth of data. For use on a daily basis.
             str_date_from, str_date_to = split_date(dt_date)
-            str_sql = """
-            SELECT snapshot_dt, periodFrom AS stay_date, SUM(value) AS count FROM stg_fwk_proj
+            str_sql_fwk = """
+            SELECT snapshot_dt, periodFrom AS stay_date, SUM(value) AS rm_nts FROM stg_fwk_proj
             WHERE classification in ('lengthOfStay1', 'lengthOfStay2', 'lengthOfStay3', 'lengthOfStay4')
             AND snapshot_dt >= '{}' AND snapshot_dt < '{}' 
             GROUP BY snapshot_dt, stay_date
             ORDER BY snapshot_dt, stay_date
             """.format(str_date_from, str_date_to)
 
-        df = pd.read_sql(str_sql, self.conn_fehdw)
-        return df
+            str_sql_ezrms = """
+            SELECT A.*, B.room_inventory FROM 
+            (SELECT snapshot_dt, date AS stay_date, hotel_code, occ_rooms AS rm_nts FROM stg_ezrms_forecast
+            WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}' ) AS A
+            INNER JOIN 
+            (SELECT old_code AS hotel_code, room_inventory FROM cfg_map_hotel_sr
+            WHERE hotel_or_sr = 'Hotel') AS B            
+            ON A.hotel_code = B.hotel_code
+            """.format(str_date_from, str_date_to)
 
-    def _calc_demand_forecast(self, df_fwk):
-        """ Given the FWK's market forecast, calculate the market demand (UoM: rm_nts).
-        :param df_fwk:
-        :return:
-        """
-        pass
+        df_fwk = pd.read_sql(str_sql_fwk, self.conn_fehdw)
+        df_fwk['snapshot_dt'] = pd.to_datetime(df_fwk['snapshot_dt'].dt.date)  # Keep only the date part, as we wish to JOIN using snapshot_dt.
+        df_fwk['occ_forecast_mkt'] = df_fwk['rm_nts'].apply(self._calc_occ_forecast)
+
+        # GET EZRMS FORECAST #
+        df_ezrms = pd.read_sql(str_sql_ezrms, self.conn_fehdw)
+        df_ezrms['snapshot_dt'] = pd.to_datetime(df_ezrms['snapshot_dt'].dt.date)  # Keep only the date part.
+
+        # MERGE #
+        df_merge = df_ezrms.merge(df_fwk, how='inner', on=['snapshot_dt', 'stay_date'], suffixes=('_ezrms', '_fwk'))
+        df_merge.to_sql('dm1_occ_forecasts_ezrms_mkt', self.conn_fehdw, index=False, if_exists=if_exists)
+        self.logger.info('[proc_occ_forecasts] Completed successfully for Period: {}'.format(str(dt_date)))
+        return df_merge
 
     def _calc_occ_forecast(self, rm_nts=None):
-        """ Given the forecasted room nights, output the percentage
+        """ Given the forecasted room nights number, output the occ percentage.
+        Uses the pre-computed coefficients from the linear model.
         :param rm_nts:
-        :return: A float, representing the percentage, rounded off to the 4th decimal (eg: 0.8123)
+        :return: A float that represents a percentage, rounded off to the 4th decimal (eg: 0.8123)
         """
         x = float(rm_nts)  # Must be integer.
         x0 = float(self.config['datarunner']['demand_forecast']['coefficients']['x0'])
@@ -152,6 +272,7 @@ class DemandForecastDataRunner(DataRunner):
         x4 = float(self.config['datarunner']['demand_forecast']['coefficients']['x4'])
         x5 = float(self.config['datarunner']['demand_forecast']['coefficients']['x5'])
 
+        # Set a ceiling and floor on the range of possible occ values. Accounting for model's robustness.
         f_max = float(self.config['datarunner']['demand_forecast']['max'])
         f_min = float(self.config['datarunner']['demand_forecast']['min'])
 
@@ -166,20 +287,151 @@ class DemandForecastDataRunner(DataRunner):
 
         return y
 
-    def run(self):
+    def proc_rm_nts_ezrms_diff_all(self, str_dt_from=None, str_dt_to=None):
+        """ Given a range of dates, to run proc_rm_nts_ezrms_diff() 1 date at a time. Inclusive of both dates.
+        Can override either or both dates if desired.
+        Set str_dt_from = str_dt_to, if you want to run this 1 day at a time in steady state.
+        """
+        # Setting upper and lower rational bounds on dt_from and dt_to, to avoid unnecessary processing.
+        str_sql = """
+        SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM dm1_occ_forecast_ezrms
+        """
+        dt_from = pd.read_sql(str_sql, self.conn_fehdw)['snapshot_dt_min'][0] + dt.timedelta(days=3)  # Shift by 3 days, because we want a look-back of at least 3 days.
+        dt_to = pd.read_sql(str_sql, self.conn_fehdw)['snapshot_dt_max'][0]
+
+        # Replace the bounds, only if so desired. Can selectively choose to replace only dt_from OR dt_to.
+        if str_dt_from is not None:
+            dt_from = pd.to_datetime(str_dt_from)
+        if str_dt_to is not None:
+            dt_to = pd.to_datetime(str_dt_to)
+
+        for d in range(int((dt_to - dt_from).days) + 1):  # +1 to make it inclusive of the dt_to.
+            self.proc_rm_nts_ezrms_diff(if_exists='append', dt_date=dt_from+dt.timedelta(days=d))
+
+        if (str_dt_from is None) & (str_dt_to is None):  # handling the 'all' case, where both will be None.
+            self.logger.info('[proc_rm_nts_ezrms_diff_all] Completed successfully for period: {} to {}'.format(str(dt_from), str(dt_to)))
+        else:
+            self.logger.info('[proc_rm_nts_ezrms_diff_all] Completed successfully for period: {} to {}'.format(str_dt_from, str_dt_to))
+
+    def proc_rm_nts_ezrms_diff(self, if_exists, dt_date, l_days=[3,7,14]):  # Comparative intervals controlled here in l_days parameter.
+        df_all = DataFrame()
+
+        str_date = dt.datetime.strftime(dt_date, format='%Y-%m-%d')
+        str_sql = """
+        SELECT snapshot_dt, stay_date, hotel_code, rm_nts_ezrms, room_inventory FROM dm1_occ_forecast_ezrms
+        WHERE snapshot_dt='{}'
+        """.format(str_date)
+
+        df = pd.read_sql(str_sql, self.conn_fehdw)
+
+        for days in l_days:  # Process for each day offset.
+            df['offset_col_key'] = df['snapshot_dt'] - dt.timedelta(days=days)  # For joining to the other table
+
+            dt_date_offset = dt_date - dt.timedelta(days=days)
+            str_date_offset = dt.datetime.strftime(dt_date_offset, format='%Y-%m-%d')
+
+            str_sql_offset = """
+            SELECT snapshot_dt, stay_date, hotel_code, rm_nts_ezrms, room_inventory FROM dm1_occ_forecast_ezrms
+            WHERE snapshot_dt='{}'
+            """.format(str_date_offset)
+            df_offset = pd.read_sql(str_sql_offset, self.conn_fehdw)
+
+            df_merge = df.merge(df_offset, how='inner',
+                                left_on=['offset_col_key', 'stay_date', 'hotel_code', 'room_inventory'],
+                                right_on=['snapshot_dt', 'stay_date', 'hotel_code', 'room_inventory'])
+            df_merge['rm_nts_ezrms_diff'] = df_merge['rm_nts_ezrms_x'] - df_merge['rm_nts_ezrms_y']
+            df_merge = df_merge[['snapshot_dt_x', 'stay_date', 'hotel_code', 'rm_nts_ezrms_diff', 'room_inventory']]
+            df_merge.columns = ['snapshot_dt', 'stay_date', 'hotel_code', 'rm_nts_ezrms_diff', 'room_inventory']
+            df_merge['days_ago'] = days
+
+            df_all = df_all.append(df_merge, ignore_index=True)
+        # Write to database.
+        df_all.to_sql('dm2_rm_nts_ezrms_diff', self.conn_fehdw, index=False, if_exists=if_exists)
+
+    def proc_occ_fc_mkt_diff_all(self, str_dt_from=None, str_dt_to=None):
+        """ Given a range of dates, to run proc_occ_fc_mkt_diff() 1 date at a time. Inclusive of both dates.
+        Can override either or both dates if desired.
+        Set str_dt_from = str_dt_to, if you want to run this 1 day at a time in steady state.
+        """
+        # Setting upper and lower rational bounds on dt_from and dt_to, to avoid unnecessary processing.
+        str_sql = """
+        SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM dm1_occ_forecasts_ezrms_mkt
+        """
+        dt_from = pd.read_sql(str_sql, self.conn_fehdw)['snapshot_dt_min'][0] + dt.timedelta(days=3)  # Shift by 3 days, because we want a look-back of at least 3 days.
+        dt_to = pd.read_sql(str_sql, self.conn_fehdw)['snapshot_dt_max'][0]
+
+        # Replace the bounds, only if so desired. Can selectively choose to replace only dt_from OR dt_to.
+        if str_dt_from is not None:
+            dt_from = pd.to_datetime(str_dt_from)
+        if str_dt_to is not None:
+            dt_to = pd.to_datetime(str_dt_to)
+
+        for d in range(int((dt_to - dt_from).days) + 1):  # +1 to make it inclusive of the dt_to.
+            self.proc_occ_fc_mkt_diff(if_exists='append', dt_date=dt_from+dt.timedelta(days=d))
+
+        if (str_dt_from is None) & (str_dt_to is None):  # handling the 'all' case, where both will be None.
+            self.logger.info('[proc_occ_fc_mkt_diff_all] Completed successfully for period: {} to {}'.format(str(dt_from.date()), str(dt_to.date())))
+        else:
+            self.logger.info('[proc_occ_fc_mkt_diff_all] Completed successfully for period: {} to {}'.format(str_dt_from, str_dt_to))
+
+    def proc_occ_fc_mkt_diff(self, if_exists, dt_date, l_days=[3,7,14]):  # Comparative intervals controlled here in l_days parameter.
+        df_all = DataFrame()
+
+        str_date = dt.datetime.strftime(dt_date, format='%Y-%m-%d')
+
+        str_sql = """
+        SELECT DISTINCT snapshot_dt, stay_date, occ_forecast_mkt FROM dm1_occ_forecasts_ezrms_mkt
+        WHERE snapshot_dt='{}'
+        """.format(str_date)
+
+        df = pd.read_sql(str_sql, self.conn_fehdw)
+
+        for days in l_days:  # Process for each day offset.
+            df['offset_col_key'] = df['snapshot_dt'] - dt.timedelta(days=days)  # For joining to the other table
+
+            dt_date_offset = dt_date - dt.timedelta(days=days)
+            str_date_offset = dt.datetime.strftime(dt_date_offset, format='%Y-%m-%d')
+
+            str_sql_offset = """
+            SELECT DISTINCT snapshot_dt, stay_date, occ_forecast_mkt FROM dm1_occ_forecasts_ezrms_mkt
+            WHERE snapshot_dt='{}'
+            """.format(str_date_offset)
+            df_offset = pd.read_sql(str_sql_offset, self.conn_fehdw)
+
+            df_merge = df.merge(df_offset, how='inner',
+                                left_on=['offset_col_key', 'stay_date'], right_on=['snapshot_dt', 'stay_date'])
+            df_merge['occ_forecast_mkt_diff'] = df_merge['occ_forecast_mkt_x'] - df_merge['occ_forecast_mkt_y']
+            df_merge['occ_forecast_mkt_diff'] = df_merge['occ_forecast_mkt_diff'].round(4)  # Round the percentage to 4 decimals.
+            df_merge = df_merge[['snapshot_dt_x', 'stay_date', 'occ_forecast_mkt_diff']]
+            df_merge.columns = ['snapshot_dt', 'stay_date', 'occ_forecast_mkt_diff_percent']
+            df_merge['days_ago'] = days
+
+            df_all = df_all.append(df_merge, ignore_index=True)
+        # Write to database.
+        df_all.to_sql('dm2_occ_fc_mkt_diff', self.conn_fehdw, index=False, if_exists=if_exists)
+
+    def run(self, if_exists='replace', dt_date=dt.datetime.today()):
+        # In steady state, no need to supply dt_date; can just use default of today().
+        # Logically, if_exists='replace' AND dt_date='all' must go together!
+
         # Ensure both FWK and EzRMS Forecast data have already been loaded for today #
         # has_been_loaded() -> dt_date defaults to today()
         if self.has_been_loaded(source='fwk', dest='mysql', file='FWK_PROJ%%') & \
-        self.has_been_loaded(source='ezrms', dest='mysql', file='forecast'):
-            # Get FWK PROJECTED DEMAND #
-            df_fwk = self._get_fwk_proj()
-            df_demand_fc = self._calc_demand_forecast(df_fwk)
-
-            # Get EzRMS
+          self.has_been_loaded(source='ezrms', dest='mysql', file='forecast'):
+            self.proc_occ_forecasts(if_exists=if_exists, dt_date=dt_date)
         else:
             self.logger.error('Missing load for FWK and/or EzRMS Forecast data for today.')
 
+        # Process EzRMS data marts independently of FWK data #
+        if self.has_been_loaded(source='ezrms', dest='mysql', file='forecast'):
+            self.proc_ezrms_forecast(if_exists=if_exists, dt_date=dt_date)
 
-
-
+            if dt_date == 'all':
+                self.proc_rm_nts_ezrms_diff_all()  # Will iterate through all possible dates in dm1_occ_forecast_ezrms.
+            else:
+                # Just run for this 1 date.
+                str_dt_date = dt.datetime.strftime(dt_date, format('%Y-%m-%d'))  # Assume dt_date is a date type
+                self.proc_rm_nts_ezrms_diff_all(str_dt_from=str_dt_date, str_dt_to=str_dt_date)  # dm2. Dependent on proc_ezrms_forecast() running successfully.
+        else:
+            self.logger.error('Missing load for EzRMS Forecast data for today.')
 

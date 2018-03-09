@@ -267,7 +267,7 @@ class OperaDataReader(DataReader):
         df_no_of_guest.columns = ['confirmation_no', 'resort', 'ng_adults', 'ng_children', 'ng_extra_beds', 'ng_cribs']
 
         l_rev_cols = ['confirmation_no', 'resort', 'business_dt', 'rev_marketcode', 'rev_ratecode', 'rev_sourcecode',
-                      'rev_sourcename', 'rev_eff_rate_amt', 'rev_actual_room_nts', 'rev_rmrev_extax',
+                      'rev_sourcename', 'rev_eff_rate_amt', 'rev_proj_room_nts', 'rev_rmrev_extax',
                       'rev_food_rev_inctax', 'rev_oth_rev_inctax', 'rev_hurdle', 'rev_hurdle_override',
                       'rev_restriction_override']
 
@@ -342,20 +342,46 @@ class OperaDataReader(DataReader):
         shutil.copy(str_fn_with_path, str_fn_dst)
         self.logger.info(f'Reading file "{str_fn_with_path}". Local copy "{str_fn_dst}"')
 
-        # READ THE FILES #
-        #df_reservation = pd.read_excel(str_fn_dst, sheet_name='Reservation', keep_default_na=False, na_values=[' '])
+        # READ THE FILE #
+        df_allot = pd.read_excel(str_fn_dst, sheet_name='Allotment ', keep_default_na=False, na_values=[' '])
+        df_allotgrp = pd.read_excel(str_fn_dst, sheet_name='Allotment +Group', keep_default_na=False, na_values=[' '], usecols='A:U')
 
-        # Renaming columns manually. Assumes that source Excel files do not change column positions, or added/deleted columns!
-        #df_allotment.columns = ['confirmation_no', 'resort', 'allot_allot_book_cde', 'allot_allot_book_desc']
+        df_allot.columns = df_allot.columns[1:].insert(0, 'resort')  # Excel formula causes first column to be read in as 'nan'.
+        df_allotgrp.columns = df_allotgrp.columns[1:].insert(0, 'resort')
 
-        # TYPE CONVERSIONS #
-        # errors='coerce' is needed sometimes because of presence of blanks (no dob given). Blanks will thus be converted to NaT.
-        # For such cases, no 'format' specified, because that causes every row to become NaT (dunno what's the format in Excel).
-        #df_merge_rev['business_dt'] = pd.to_datetime(df_merge_rev['business_dt'], format='%d/%m/%Y')
+        # Remove unnecessary characters from column names, and lowercase all columns.
+        l_cols = df_allot.columns.str.replace('[()/.]', '')  # Regex
+        l_cols = l_cols.str.replace(r' ', '_')
+        l_cols = l_cols.str.replace(r'__', '_')  # Replace resultant double underscore with only single underscore. Happens only for df_allot.
+        l_cols = l_cols.str.lower()
+        df_allot.columns = l_cols
+
+        l_cols = df_allotgrp.columns.str.replace('[()/.?]', '')  # Regex
+        l_cols = l_cols.str.replace(r' ', '_')
+        l_cols = l_cols.str.lower()
+        df_allotgrp.columns = l_cols
+
+        # Keep only rows where the status is Definite, Tentative, or Allocated (to Wholesaler). Actual (ACT) and CXL (Cancelled) are irrelevant and hence omitted.
+        df_allot = df_allot[df_allot['booking_status_code'].isin(['DEF', 'TEN', 'ALLT'])]
+        df_merge = df_allot.merge(df_allotgrp, how='inner',
+                                  left_on=['resort', 'allotment_date', 'allotment_booking_description', 'label'],
+                                  right_on=['resort', 'considered_date', 'company', 'label'])  # stay_date = 'allotment_date' = 'considered_date'
+        # Tidying up #
+        # Drop unwanted columns.
+        df_merge.columns = df_merge.columns.str.replace('-', '_')
+
+        df_merge.drop(labels=['begin_date', 'end_date', 'original_begin_date', 'original_end_date', 'date_opened_for_pickup',
+                              'cancellation_date', 'decision_date_for_rooms', 'follow_up_date_for_rooms',
+                              'decision_date_for_catering', 'to_sell', 'released', 'available', 'aggregate_prospective_occupancy',
+                              'aggregate_pickup_occupancy', 'block_or_individual_', 'reservation_inventory_type',
+                              'considered_date', 'origin_code', 'country_code', 'company'], axis=1, inplace=True)
+        df_merge = df_merge[df_merge.columns[~df_merge.columns.str.endswith('_y')]]  # Keep only columns with no "_y" suffix.
+        df_merge.columns = df_merge.columns.str.replace('_x$', '')  # For the column names with the "_x" suffix, remove the suffix part.
+        df_merge['snapshot_dt'] = dt.datetime.now()
 
         # WRITE TO DATABASE #
         self.logger.info('Loading file contents to data warehouse.')
-        #df_merge_nonrev.to_sql('stg_op_cag_*', self.db_conn, index=False, if_exists='append')
+        df_merge.to_sql('stg_op_cag', con=self.db_conn, index=False, if_exists='append')  # CAG: Cancellations, Allotments, Groups.
 
         # LOG DATALOAD #
         self.logger.info('Logged data load activity to system log table.')
@@ -372,7 +398,7 @@ class OperaDataReader(DataReader):
         self.load_otb(pattern='60 days.xlsx$')  # OTB 0-60 days onwards. Currently always picks the last modified file with this file name.
         self.load_otb(pattern='61 days.xlsx$')  # OTB 61 days onwards.
         self.load_otb(pattern='History.xlsx$')  # History (aka: Actuals)
-        #self.load_otb(pattern='CAG.xlsx$')      # CAG (Corporate Groups Allocations)
+        self.load_cag(pattern='CAG.xlsx$')      # CAG (Corporate Groups Allocations)
 
 
 class OTAIDataReader(DataReader):
