@@ -270,6 +270,8 @@ class OperaDataReader(DataReader):
                       'rev_sourcename', 'rev_eff_rate_amt', 'rev_proj_room_nts', 'rev_rmrev_extax',
                       'rev_food_rev_inctax', 'rev_oth_rev_inctax', 'rev_hurdle', 'rev_hurdle_override',
                       'rev_restriction_override']
+        if is_history_file:  # The column name for the Historical/Act table is different from that of the OTB table.
+            l_rev_cols = [x.replace('rev_proj_room_nts', 'rev_actual_room_nts') for x in l_rev_cols]
 
         df_rev_ohs_tqh.columns = l_rev_cols
         df_rev_oph_tes.columns = l_rev_cols
