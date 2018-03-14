@@ -77,7 +77,7 @@ def check_dataload_not_logged(t_timenow, conn):
         See the list below for details of which scheduled loads have problems.
         """
         str_msg2 = """
-        Check tables "sys_cfg_dataload_sched" and "sys_log_dataload", to see why a scheduled data load in the former,
+        Check tables "sys_cfg_dataload_sched" and "sys_log_dataload_freq", to see why a scheduled data load in the former,
         is not present in the latter table. Successful data loads should always be logged. 
         """
         str_subject = '[fehdw_admin] Error - Data Loading Failed'
@@ -247,3 +247,51 @@ def db_truncate_tables():
         str_sql = f"TRUNCATE {tab};"
         pd.io.sql.execute(str_sql, dr.db_conn)
         dr.logger.info(f'Truncated database table: {tab}')
+
+
+def get_db_table_info(conn=None, schema='fehdw', filename=sys.stdout):
+    """ Given a database connection and a schema, dumps useful table and column information.
+    To quickly get some information about what a specific table is for, or to get the column specifications.
+    """
+    if filename != sys.stdout:
+        fh = open(filename, 'w',
+                  encoding='utf-8')  # Default is cp1252 on Windows. Use locale.getpreferredencoding(False)
+    else:
+        fh = sys.stdout
+
+    # Retrieve data from MySQL DB #
+    str_sql = """
+    SELECT TABLE_NAME, TABLE_ROWS, CREATE_TIME, UPDATE_TIME, TABLE_COMMENT FROM INFORMATION_SCHEMA.TABLES
+    WHERE table_schema = '{}'
+    AND TABLE_TYPE = 'BASE TABLE'
+    """.format(schema)
+    df_tabs = pd.read_sql(str_sql, conn)
+    df_tabs.columns = [x.lower() for x in df_tabs.columns]
+
+    str_sql = """
+    SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, ORDINAL_POSITION FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = '{}'
+    """.format(schema)
+    df_cols = pd.read_sql(str_sql, conn)
+    df_cols.columns = [x.lower() for x in df_cols.columns]
+
+    df_merge = pd.merge(df_tabs, df_cols, on='table_name')
+    df_t = df_merge.groupby(by=['table_name']).size().rename('col_count').reset_index().copy()
+    df_merge = pd.merge(df_merge, df_t, on='table_name')
+
+    # Write to file #
+    for tab, df in df_merge.groupby(by=['table_name']):
+        sr_row = df.iloc[0]  # Just take the first row as it is representative. All the column values are the same.
+        print('===> TABLE: {}'.format(tab), file=fh)
+
+        if sr_row['table_comment'] != '':
+            print('Description: {}'.format(sr_row['table_comment']), file=fh)
+
+        print('Row_count: {} | Column_count: {} | Updated: {} | Created: {}'.format(sr_row['table_rows'],
+                                                                                    sr_row['col_count'],
+                                                                                    sr_row['update_time'],
+                                                                                    sr_row['create_time']), file=fh)
+        print('COLUMNS', file=fh)
+        for i in df.index:
+            print('col_name: {} (Type: {})'.format(df.loc[int(i), 'column_name'], df.loc[int(i), 'data_type']), file=fh)
+        print('\n', file=fh)

@@ -3,7 +3,6 @@ import time
 import functools
 import pandas as pd
 import os
-import sys
 import re
 import io
 import logging
@@ -13,7 +12,6 @@ import sqlalchemy
 from configobj import ConfigObj
 from pandas import DataFrame, Series
 from feh.utils import dec_err_handler, get_files, MaxDataLoadException
-import pyeloqua
 from pyeloqua import Bulk
 
 
@@ -69,7 +67,6 @@ class DataReader(object):
             str_format = '[%(asctime)s]-[%(levelname)s]- %(message)s'
             fh_logger.setFormatter(logging.Formatter(str_format))
             self.logger.addHandler(fh_logger)  # Add handler.
-
 
     def _free_logger(self):
         """ Frees up all file handlers. Method is to be called on __del__().
@@ -127,7 +124,7 @@ class DataReader(object):
 
         # Check the policy table for how many data loads should be allowed.
         str_sql = """
-        SELECT * FROM sys_cfg_dataload
+        SELECT * FROM sys_cfg_dataload_freq
         WHERE source = '{}'
         AND dest = '{}'
         AND file = '{}'
@@ -136,7 +133,7 @@ class DataReader(object):
 
         if len(df) == 0:
             str_sql = """
-            SELECT * FROM sys_cfg_dataload
+            SELECT * FROM sys_cfg_dataload_freq
             WHERE source = '{}'
             AND dest = '{}'
             AND file = '*'
@@ -176,6 +173,7 @@ class DataReader(object):
             """.format(source, dest, str_date)
 
         pd.io.sql.execute(str_sql, self.db_conn)
+
 
 class OperaDataReader(DataReader):
     """ For reading Opera files, which are output by Vision (run on SQ's laptop), then copied to SFTP server.

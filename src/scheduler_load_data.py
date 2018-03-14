@@ -20,7 +20,7 @@ if t_from <= TIME_NOW < t_to:
     fwk_dr.load()
 
 # Opera #
-# Data Access Window: 0520-0600 hrs
+# Data Access Window: 0530-0600 hrs
 t_from, t_to = feh.utils.get_dataload_sched(source='opera', dest='mysql', file='*', conn=dr.db_conn)
 if t_from <= TIME_NOW < t_to:
     op_dr = OperaDataReader()
