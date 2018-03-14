@@ -440,13 +440,14 @@ class OTAIDataReader(DataReader):
 
     def load_hotels(self):
         """ Loads Hotels and Compset IDs to data warehouse. We need the IDs for further queries (eg: rates).
-        We should not have to call this frequently. Perhaps can periodically refresh, to avoid API calls.
+        As the list of hotels and compset can change without notice, we will load this once per day, overwriting the existing table.
         """
         res = requests.get(self.BASE_URL + 'hotels', params={'token': self.API_TOKEN, 'format': 'csv'})  # Better to use requests module. Can check for "requests.ok" -> HTTP 200.
         df_hotels = pd.read_csv(io.StringIO(res.content.decode('utf-8')))
         #df_hotels.columns = ['hotel_id', 'hotel_name', 'hotel_stars', 'comp_id', 'comp_name', 'comp_stars', 'compset_id', 'compset_name']
 
         # New column. Label the dataset with known Hotels; remainder are deemed to be SRs.
+        # Note that this labeling checks against HotelID; it is with reference to FEH's hotels and SRs only.
         l_hotelid = [25002, 25105, 25106, 25107, 25109, 25119, 25167, 296976, 359549, 613872, 1663218]  # 11 hotels
         df_hotels['hotel_category'] = 'sr'  # default value.
         df_hotels['hotel_category'][df_hotels['HotelID'].isin(l_hotelid)] = 'hotel'
@@ -473,10 +474,13 @@ class OTAIDataReader(DataReader):
         elif res.status_code == 429:  # 429 Too Many Requests. API calls are rate-limited to 120 requests/min per token.
             str_err = 'Hotel Rates: HTTP 429 Too Many Requests'
             raise Exception(str_err)
+        else:
+            str_err = 'Unknown exception. HTTP Request status code: {}'.format(res.status_code)
+            raise Exception(str_err)
 
     @dec_err_handler(retries=0)
     def load_rates(self):
-        SOURCE = self.SOURCE_NAME  #'otai'
+        SOURCE = self.SOURCE_NAME  # 'otai'
         DEST = 'mysql'
         FILE = 'rates'
         # Check using str_fn if file has already been loaded before. If yes, terminate processing.
@@ -490,6 +494,9 @@ class OTAIDataReader(DataReader):
         for hotel_id in self.l_hotels_and_comp_ids:  # Get the Rates exactly ONCE for each HotelID. List has unique IDs.
             df = self.get_rates_hotel(str_hotel_id=str(hotel_id))
             df_all = df_all.append(df, ignore_index=True)
+
+        # De-duplicate rates in df_all. Duplicates may exist because the same hotel is a competitor for 2 (or more) of our hotels.
+        df_all.drop_duplicates(inplace=True)
 
         self.logger.info('Hotel Rates: Loading to data warehouse.')
         df_all['snapshot_dt'] = dt.datetime.today()  # Add a timestamp when the data was loaded.
@@ -509,6 +516,7 @@ class OTAIDataReader(DataReader):
     def load(self):
         """ Loads data from a related cluster of data sources.
         """
+        self.load_hotels()  # This must run first, in case the CompSet has been changed.
         self.load_rates()
 
 
