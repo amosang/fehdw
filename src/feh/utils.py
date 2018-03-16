@@ -43,6 +43,7 @@ def check_dataload_not_logged(t_timenow, conn):
             t_from = dt.time(int(time_from[:2]), int(time_from[2:]))
             t_to = dt.time(int(time_to[:2]), int(time_to[2:]))
             # For each scheduled task that is supposed to have run, check if log entry exists, indicating successful run #
+            # There will not be repeated alert emails sent, because the monitoring happens immediately after the job which generates the logs, both of which run in the same half hour time window!
             if t_from <= t_timenow < t_to:
                 # CHECK IF LOG ENTRY ALREADY EXISTS #
                 if row['file'] == '*':

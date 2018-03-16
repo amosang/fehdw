@@ -431,8 +431,8 @@ class OTAIDataReader(DataReader):
             df = pd.read_sql(str_sql, self.db_conn)
             self.df_hotels = df  # Class attribute.
 
-        # List of unique HotelIDs and CompetitorIDs. For use in future calls (eg: self.load_rates() ).
-        self.l_hotels_and_comp_ids = list(set(self.df_hotels['HotelID'].tolist() + self.df_hotels['CompetitorID'].tolist()))
+        # List of UNIQUE HotelIDs. For use in future calls (eg: self.load_rates() ).
+        self.l_hotels = set(self.df_hotels['HotelID'].tolist())
 
     def __del__(self):
         super().__del__()
@@ -456,8 +456,15 @@ class OTAIDataReader(DataReader):
         df_hotels.to_sql('stg_otai_hotels', self.db_conn, index=False, if_exists='replace')
 
     def get_rates_hotel(self, str_hotel_id=None, format='csv', ota='bookingdotcom'):
-        # Defaults: los: 1, persons:2, mealType: nofilter (lowest), shopLength: 90 (max: 365), changeDays: None (max: 3 values, max: 30 days), compsetIds=1
-        # Not using changeDays (we will calculate it ourselves).
+        """ Calls the OTAI API to get the competitor rates, for a given FEH HotelID.
+        Defaults: los: 1, persons:2, mealType: nofilter (lowest), shopLength: 90 (max: 365), changeDays: None (max: 3 values, max: 30 days), compsetIds=1
+        Not using parameter: changeDays (we will calculate it ourselves).
+        Note: You should call the API using only our own HotelIDs, else you'll get a HTTP 401.
+        :param str_hotel_id:
+        :param format:
+        :param ota:
+        :return:
+        """
         params = {'token': self.API_TOKEN,
                   'format': format,
                   'hotelId': str_hotel_id,  # parameter names are case sensitive.
@@ -491,12 +498,14 @@ class OTAIDataReader(DataReader):
         df_all = DataFrame()  # accumulator
 
         self.logger.info('Hotel Rates: Reading from API.')
-        for hotel_id in self.l_hotels_and_comp_ids:  # Get the Rates exactly ONCE for each HotelID. List has unique IDs.
+        for hotel_id in self.l_hotels:  # Get the Rates exactly ONCE for each HotelID. List has unique IDs.
             df = self.get_rates_hotel(str_hotel_id=str(hotel_id))
             df_all = df_all.append(df, ignore_index=True)
 
         # De-duplicate rates in df_all. Duplicates may exist because the same hotel is a competitor for 2 (or more) of our hotels.
-        df_all.drop_duplicates(inplace=True)
+        # 16 Mar 2018: It may be the case that if for the same stay_date/hotelid, OTAI returns 2 rows for a hotel, each row being different room_types at the same price!
+        # Hence the drop_duplicates() below is using the combined key of ['HotelID', 'ArrivalDate', 'Value'].
+        df_all.drop_duplicates(subset=['HotelID', 'ArrivalDate', 'Value'], inplace=True)
 
         self.logger.info('Hotel Rates: Loading to data warehouse.')
         df_all['snapshot_dt'] = dt.datetime.today()  # Add a timestamp when the data was loaded.

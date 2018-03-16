@@ -208,6 +208,35 @@ class OperaOTBDataRunner(DataRunner):
         pass
 
 
+class OTAIDataRunner(DataRunner):
+    """ For generating relative ranking (by price) of all the hotels in the OTAI compset.
+    Includes FEH's hotels in the ranking as well.
+    Writes the result into a data mart for subsequent visualization.
+    """
+    def __init__(self):
+        super().__init__()
+        self.APP_NAME = self.config['datarunner']['hotel_price_rank']['app_name']
+        self._init_logger(logger_name=self.APP_NAME + '_datareader', app_name=self.APP_NAME)
+
+    def __del__(self):
+        super().__del__()
+        self._free_logger()
+
+    def proc_hotel_price_rank_all(self, str_dt_from=None, str_dt_to=None):
+        pass
+
+    def proc_hotel_price_rank(self, dt_date=dt.datetime.today()):
+        # Get ONLY 1 snapshot_dt worth of data. For use on a daily basis.
+        str_date_from, str_date_to = split_date(dt_date)
+
+        str_sql = """
+        SELECT DATE(snapshot_dt) AS snapshot_dt, ArrivalDate AS stay_date, HotelID AS hotel_id, HotelName AS hotel_name, Value AS price FROM stg_otai_rates
+        WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}'       
+        """.format(str_date_from, str_date_to)
+
+        df = pd.read_sql(str_sql, self.conn_fehdw)
+        # CONTINUE HERE #
+
 class OccForecastDataRunner(DataRunner):
     """ For generating the Occupancy forecast, based on FWK's predicted demand (rm_nts).
     Loads the model's coefficients, and uses these to compute the predicted Market Occupancy.
