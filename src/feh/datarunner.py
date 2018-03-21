@@ -340,8 +340,8 @@ class OperaOTBDataRunner(DataRunner):
                 df_diff.dropna(axis=0, how='all', inplace=True)  # Drop the row if all 4 columns are NaN. Effectively works like an inner join.
 
                 # Bring in the original 'rev_proj_room_nts' as 'rev_proj_room_nts_new', for occupancy calculation at the Viz level.
-                df_diff = df_diff.merge(df_new_grp[['rev_proj_room_nts']], how='left', left_index=True, right_index=True,
-                                        suffixes=('_diff', '_new'))
+                df_diff = df_diff.merge(df_new_grp[['rev_proj_room_nts', 'rev_rmrev_extax']], how='left',
+                                        left_index=True, right_index=True, suffixes=('_diff', '_new'))
                 # Tidying up. Putting in of new columns.
                 df_diff.reset_index(inplace=True, drop=False)
                 df_diff['days_ago'] = days  # New column to store how many days ago
@@ -350,15 +350,14 @@ class OperaOTBDataRunner(DataRunner):
                 df_all = df_all.append(df_diff)
 
         # Bring in the hotel room inventory as another column, for calculating Occupancy #
-        str_sql = """ SELECT old_code as hotel_code, room_inventory FROM cfg_map_hotel_sr WHERE hotel_or_sr = 'hotel' """
+        str_sql = """ SELECT old_code as hotel_code, room_inventory FROM cfg_map_properties WHERE asset_type = 'hotel' AND operator = 'feh' """
         df_hotel_rms = pd.read_sql(str_sql, self.conn_fehdw)
         df_all = df_all.merge(df_hotel_rms, how='left', on=['hotel_code'])
         df_all = df_all[['snapshot_dt', 'days_ago', 'stay_date', 'hotel_code', 'room_inventory', 'sale_comp_name',
                          'sale_trav_agent_name', 'res_bkdroom_ct_lbl', 'rev_marketcode', 'booking_status_code',
-                         'rev_proj_room_nts_new', 'rev_proj_room_nts_diff', 'rev_rmrev_extax', 'rev_food_rev_inctax',
-                         'rev_oth_rev_inctax']]
-        df_all.rename(columns={'rev_rmrev_extax': 'rev_rmrev_extax_diff', 'rev_food_rev_inctax': 'rev_food_rev_inctax_diff',
-                     'rev_oth_rev_inctax': 'rev_oth_rev_inctax_diff'}, inplace=True)
+                         'rev_proj_room_nts_new', 'rev_proj_room_nts_diff', 'rev_rmrev_extax_new',
+                         'rev_rmrev_extax_diff', 'rev_food_rev_inctax', 'rev_oth_rev_inctax']]
+        df_all.rename(columns={'rev_food_rev_inctax': 'rev_food_rev_inctax_diff', 'rev_oth_rev_inctax': 'rev_oth_rev_inctax_diff'}, inplace=True)
 
         # WRITE TO DATABASE #
         df_all.to_sql('dm2_op_otb_with_allot_diff', self.conn_fehdw, index=False, if_exists='append')
@@ -528,7 +527,7 @@ class OccForecastDataRunner(DataRunner):
         Merges the result with EzRMS Occ Forecast. Writes to data mart level 1.
         Does this for only 1 specified date.
 
-        Reads from tables: stg_fwk_proj, stg_ezrms_forecast, cfg_map_hotel_sr
+        Reads from tables: stg_fwk_proj, stg_ezrms_forecast, cfg_map_properties
         Writes to tables: dm1_occ_forecasts_ezrms_mkt
 
         :param dt_date:
@@ -554,8 +553,8 @@ class OccForecastDataRunner(DataRunner):
         (SELECT snapshot_dt, date AS stay_date, hotel_code, occ_rooms AS rm_nts FROM stg_ezrms_forecast
         WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}' ) AS A
         INNER JOIN 
-        (SELECT old_code AS hotel_code, room_inventory FROM cfg_map_hotel_sr
-        WHERE hotel_or_sr = 'Hotel') AS B            
+        (SELECT old_code AS hotel_code, room_inventory FROM cfg_map_properties
+        WHERE asset_type = 'hotel' AND operator = 'feh') AS B            
         ON A.hotel_code = B.hotel_code
         """.format(str_date_from, str_date_to)
 
@@ -642,8 +641,9 @@ class OccForecastDataRunner(DataRunner):
         (SELECT snapshot_dt, date AS stay_date, hotel_code, occ_rooms AS rm_nts_ezrms FROM stg_ezrms_forecast
         WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}' ) AS A
         INNER JOIN 
-        (SELECT old_code AS hotel_code, room_inventory FROM cfg_map_hotel_sr
-        WHERE hotel_or_sr = 'Hotel') AS B            
+        (SELECT old_code AS hotel_code, room_inventory FROM cfg_map_properties
+        WHERE asset_type = 'hotel' 
+        AND operator = 'feh') AS B            
         ON A.hotel_code = B.hotel_code
         """.format(str_date_from, str_date_to)
 
