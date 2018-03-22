@@ -421,6 +421,9 @@ class OTAIDataRunner(DataRunner):
     def proc_hotel_price_rank(self, dt_date=dt.datetime.today()):
         """ Ranks the hotels by price, based on OTAI price data, for a given snapshot_dt (the data comes in by snapshots daily).
         Highest price has higher rank (ie: smaller number); close-outs get a value of 1. It's okay to share the same rank.
+
+        Reads from tables: stg_otai_rates
+        Writes to tables: dm1_hotel_price_rank
         :param dt_date:
         :return: NA
         """

@@ -453,6 +453,11 @@ class OTAIDataReader(DataReader):
         df_hotels['hotel_category'][df_hotels['HotelID'].isin(l_hotelid)] = 'hotel'
         df_hotels['snapshot_dt'] = dt.datetime.now()
 
+        # Keep only the CompsetID = 1 (ie: CompsetName = 'App Primary'). Ignore secondary compset.
+        df_hotels = df_hotels[df_hotels['CompsetID'] == 1]
+        df_hotels['HotelID'] = df_hotels['HotelID'].astype(str)  # Standardize and convert all ID-type fields to string.
+
+        # WRITE TO DATABASE #
         df_hotels.to_sql('stg_otai_hotels', self.db_conn, index=False, if_exists='replace')
 
     def get_rates_hotel(self, str_hotel_id=None, format='csv', ota='bookingdotcom'):
@@ -507,8 +512,12 @@ class OTAIDataReader(DataReader):
         # Hence the drop_duplicates() below is using the combined key of ['HotelID', 'ArrivalDate', 'Value'].
         df_all.drop_duplicates(subset=['HotelID', 'ArrivalDate', 'Value'], inplace=True)
 
+        df_all['HotelID'] = df_all['HotelID'].astype(str)  # Standardize and convert all ID-type fields to string.
+
         self.logger.info('Hotel Rates: Loading to data warehouse.')
         df_all['snapshot_dt'] = dt.datetime.today()  # Add a timestamp when the data was loaded.
+
+        # WRITE TO DATABASE #
         df_all.to_sql('stg_otai_rates', self.db_conn, index=False, if_exists='append')
 
         # Write a tab-separated copy to SFTP server for ORCA1.
