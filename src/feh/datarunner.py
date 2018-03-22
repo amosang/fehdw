@@ -301,9 +301,13 @@ class OperaOTBDataRunner(DataRunner):
             self.proc_op_otb_with_allot(dt_date=dt_from + dt.timedelta(days=d))
 
     def proc_op_otb_with_allot_diff(self, dt_date_ref, l_days_diff=[1,3,7]):  # We want 1, 3, 7 days_diff.
-        """ Dependent on Table: dm1_op_otb_with_allot, and assumes it has been run up to date.
+        """ Dependent on Table: dm1_op_otb_with_allot, and assumes it has been run up-to-date.
         Pre-computes the pick-up in rm_nts and revenues, between 2 snapshot_dts.
+        Note on vocab: "df_new" refers to the data set with snapshot_dt as the "reference date".
+        "df_old" refers to the data set with snapshot_dt N days ago.
+
         Reads from table: dm1_op_otb_with_allot
+        Writes to table: dm2_op_otb_with_allot_diff
 
         :param dt_date_ref: The reference date, from which we calculate 1/3/7 days before.
         :param l_days_diff: List of number of days before. Use default values.
@@ -336,12 +340,15 @@ class OperaOTBDataRunner(DataRunner):
 
             if (len(df_new_grp) > 0) & (len(df_old_grp) > 0):  # Ensure that both df have records, to avoid crash when doing subtract().
                 # Get the difference between the values of all columns. Recall that each df represents a data set for each snapshot_dt.
-                df_diff = df_new_grp.subtract(df_old_grp)
-                df_diff.dropna(axis=0, how='all', inplace=True)  # Drop the row if all 4 columns are NaN. Effectively works like an inner join.
+                df_diff = df_new_grp.subtract(df_old_grp)  # For subtract(), if indices are mismatched, the resultant set will contain the union of both dataframe's index!
 
                 # Bring in the original 'rev_proj_room_nts' as 'rev_proj_room_nts_new', for occupancy calculation at the Viz level.
                 df_diff = df_diff.merge(df_new_grp[['rev_proj_room_nts', 'rev_rmrev_extax']], how='left',
                                         left_index=True, right_index=True, suffixes=('_diff', '_new'))
+                # Note: We dropna() only AFTER the merge, because we want to eliminate only the df_old_grp indices. This way, some storage space is saved, as the entire row contains only NaNs.
+                # The "rev_proj_room_nts_new" and "rev_rmrev_extax_new" fields come from df_new_grp (ie: data set of the "reference date").
+                df_diff.dropna(axis=0, how='all', inplace=True)
+
                 # Tidying up. Putting in of new columns.
                 df_diff.reset_index(inplace=True, drop=False)
                 df_diff['days_ago'] = days  # New column to store how many days ago
@@ -750,8 +757,8 @@ class OccForecastDataRunner(DataRunner):
         else:
             self.logger.info('[proc_rm_nts_ezrms_diff_all] Completed successfully for period: {} to {}'.format(str_dt_from, str_dt_to))
 
-    def proc_occ_fc_mkt_diff_all(self, str_dt_from=None, str_dt_to=None):
-        """ Given a range of dates, to run proc_occ_fc_mkt_diff() 1 date at a time. Inclusive of both dates.
+    def proc_occ_forecasts_mkt_diff_all(self, str_dt_from=None, str_dt_to=None):
+        """ Given a range of dates, to run proc_occ_forecasts_mkt_diff() 1 date at a time. Inclusive of both dates.
         Can override either or both dates if desired.
         Set str_dt_from = str_dt_to, if you want to run this 1 day at a time in steady state.
         """
@@ -769,14 +776,14 @@ class OccForecastDataRunner(DataRunner):
             dt_to = pd.to_datetime(str_dt_to)
 
         for d in range(int((dt_to - dt_from).days) + 1):  # +1 to make it inclusive of the dt_to.
-            self.proc_occ_fc_mkt_diff(if_exists='append', dt_date=dt_from+dt.timedelta(days=d))
+            self.proc_occ_forecasts_mkt_diff(if_exists='append', dt_date=dt_from + dt.timedelta(days=d))
 
         if (str_dt_from is None) & (str_dt_to is None):  # handling the 'all' case, where both will be None.
-            self.logger.info('[proc_occ_fc_mkt_diff_all] Completed successfully for period: {} to {}'.format(str(dt_from.date()), str(dt_to.date())))
+            self.logger.info('[proc_occ_forecasts_mkt_diff_all] Completed successfully for period: {} to {}'.format(str(dt_from.date()), str(dt_to.date())))
         else:
-            self.logger.info('[proc_occ_fc_mkt_diff_all] Completed successfully for period: {} to {}'.format(str_dt_from, str_dt_to))
+            self.logger.info('[proc_occ_forecasts_mkt_diff_all] Completed successfully for period: {} to {}'.format(str_dt_from, str_dt_to))
 
-    def proc_occ_fc_mkt_diff(self, if_exists, dt_date, l_days=[3,7,14]):  # Comparative intervals controlled here in l_days parameter.
+    def proc_occ_forecasts_mkt_diff(self, if_exists, dt_date, l_days=[3, 7, 14]):  # Comparative intervals controlled here in l_days parameter.
         df_all = DataFrame()
 
         str_date = dt.datetime.strftime(dt_date, format='%Y-%m-%d')
