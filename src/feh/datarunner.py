@@ -180,26 +180,30 @@ class DataRunner(object):
         Due to dependencies, dm1* tables must be re-created before dm2* types.
         Assumption is that the stg* tables are already up-to-date.
 
-        For greater control over the process, something which is dropped will immediately be reloaded, instead of dropping all tables at once.
-        However, each logical group of tables will be treated as a set, and dropped as a set.
+        For greater control over the process, something which is dropped will be reloaded soonest possible, instead of dropping all tables at once.
+        Each logical group of tables will be treated as a set, and dropped as a set.
         """
+        # Create only 1 instance of each class, to avoid having 2 instances of the same class, as this causes
+        # file logger issues (2nd instance unable to get a lock on the log file and hence cannot write to it).
+        of_dr = OccForecastDataRunner()
+        op_dr = OperaOTBDataRunner()
+        otai_dr = OTAIDataRunner()
+
         # EzRMS and Market Occ Forecast #
         self.logger.info('DELETING DATA MART: {}'.format('dm1_occ_forecasts_ezrms_mkt'))
         str_sql = """
         DROP TABLE IF EXISTS dm1_occ_forecasts_ezrms_mkt;
         """
         pd.io.sql.execute(str_sql, self.conn_fehdw)
-        of_dr = OccForecastDataRunner()
         of_dr.remove_log_datarun(run_id='proc_occ_forecasts', str_snapshot_dt=None)
         of_dr.proc_occ_forecasts_all()
 
         # Market Occ Forecast #  => Note the dependency on dm1_occ_forecasts_ezrms_mkt!
-        self.logger.info('DELETING DATA MART: {}'.format('dm1_occ_forecasts_ezrms_mkt'))
+        self.logger.info('DELETING DATA MART: {}'.format('dm2_occ_forecast_mkt_diff'))
         str_sql = """
         DROP TABLE IF EXISTS dm2_occ_forecast_mkt_diff;
         """
         pd.io.sql.execute(str_sql, self.conn_fehdw)
-        of_dr = OccForecastDataRunner()
         of_dr.remove_log_datarun(run_id='proc_occ_forecast_mkt_diff', str_snapshot_dt=None)
         of_dr.proc_occ_forecast_mkt_diff_all()
 
@@ -210,7 +214,6 @@ class DataRunner(object):
         DROP TABLE IF EXISTS dm1_occ_forecast_ezrms, dm2_occ_forecast_ezrms_diff;
         """
         pd.io.sql.execute(str_sql, self.conn_fehdw)
-        of_dr = OccForecastDataRunner()
         of_dr.remove_log_datarun(run_id='proc_occ_forecast_ezrms', str_snapshot_dt=None)
         of_dr.remove_log_datarun(run_id='proc_occ_forecast_ezrms_diff', str_snapshot_dt=None)
         of_dr.proc_occ_forecast_ezrms_all()
@@ -223,7 +226,6 @@ class DataRunner(object):
         DROP TABLE IF EXISTS dm1_op_otb_with_allot, dm2_op_otb_with_allot_diff;
         """
         pd.io.sql.execute(str_sql, self.conn_fehdw)
-        op_dr = OperaOTBDataRunner()
         op_dr.remove_log_datarun(run_id='proc_op_otb_with_allot', str_snapshot_dt=None)
         op_dr.remove_log_datarun(run_id='proc_op_otb_with_allot_diff', str_snapshot_dt=None)
         op_dr.proc_op_otb_with_allot_all()
@@ -236,7 +238,6 @@ class DataRunner(object):
         DROP TABLE IF EXISTS dm1_hotel_price_rank;
         """
         pd.io.sql.execute(str_sql, self.conn_fehdw)
-        otai_dr = OTAIDataRunner()
         otai_dr.remove_log_datarun(run_id='proc_hotel_price_rank', str_snapshot_dt=None)
         otai_dr.proc_hotel_price_rank_all()
 
