@@ -456,6 +456,8 @@ class OTAIDataReader(DataReader):
         # Keep only the CompsetID = 1 (ie: CompsetName = 'App Primary'). Ignore secondary compset.
         df_hotels = df_hotels[df_hotels['CompsetID'] == 1]
         df_hotels['HotelID'] = df_hotels['HotelID'].astype(str)  # Standardize and convert all ID-type fields to string.
+        df_hotels['CompetitorID'] = df_hotels['CompetitorID'].astype(str)
+        df_hotels['CompsetID'] = df_hotels['CompsetID'].astype(str)
 
         # WRITE TO DATABASE #
         df_hotels.to_sql('stg_otai_hotels', self.db_conn, index=False, if_exists='replace')

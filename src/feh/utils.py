@@ -296,3 +296,5 @@ def get_db_table_info(conn=None, schema='fehdw', filename=sys.stdout):
         for i in df.index:
             print('col_name: {} (Type: {})'.format(df.loc[int(i), 'column_name'], df.loc[int(i), 'data_type']), file=fh)
         print('\n', file=fh)
+
+

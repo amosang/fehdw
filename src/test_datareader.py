@@ -11,7 +11,7 @@ if TEST_CASE == 'test_load_rates':
     otai_dr = OTAIDataReader()
     #otai_dr.remove_log_dataload('opera', 'mysql', str_date='2018-02-01')
     #otai_dr.get_rates_hotel(str_hotel_id=25042)
-    otai_dr.load_rates()
+    otai_dr.load_hotels()
 
 
 if TEST_CASE == 'test_op_cag':
