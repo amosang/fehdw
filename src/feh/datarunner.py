@@ -74,6 +74,46 @@ class DataRunner(object):
             handler.close()
             self.logger.removeHandler(handler)
 
+    def _generic_run_all(self, run_id, l_data_src_tabs, str_func_name, i_dt_from_offset=0, str_dt_from=None, str_dt_to=None):
+        """ Generic method for repeated calling of given method.
+        """
+        dt_from = None
+        dt_to = None
+
+        # Get the intersection of snapshot_dts, if multiple tables are involved #
+        for tab in l_data_src_tabs:
+            # Setting upper and lower rational bounds on dt_from and dt_to, to avoid unnecessary processing #
+            str_sql = """
+            SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM {}
+            """.format(tab)
+            sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
+            dt_from_temp = sr['snapshot_dt_min'] + dt.timedelta(days=i_dt_from_offset)  # Shift by N days, because we want a look-back of at least N days.
+            dt_to_temp = sr['snapshot_dt_max']
+
+            if dt_from is None:
+                dt_from = dt_from_temp
+            else:
+                if dt_from_temp > dt_from:
+                    dt_from = dt_from_temp  # for "from", we want the later date.
+
+            if dt_to is None:
+                dt_to = dt_to_temp
+            else:
+                if dt_to_temp < dt_to:
+                    dt_to = dt_to_temp  # for "to", we want the earlier date.
+
+        # Replace the bounds, only if so desired. Can selectively choose to overwrite only dt_from OR dt_to.
+        if str_dt_from is not None:
+            dt_from = pd.to_datetime(str_dt_from)
+        if str_dt_to is not None:
+            dt_to = pd.to_datetime(str_dt_to)
+
+        self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
+
+        meth = getattr(self.__class__, str_func_name)  # From the method name, get the method.
+        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
+            meth(self, dt_date=dt_from + dt.timedelta(days=d))
+
     def has_been_loaded(self, source, dest, file, dt_date=dt.datetime.today()):
         """ DEPRECATED.
         20 Mar 2018: If a data load fails, there will already be an alert. The admin should rectify the data load
@@ -362,7 +402,7 @@ class OperaOTBDataRunner(DataRunner):
 
         self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
 
-        for d in range(int((dt_to - dt_from).days) + 1):  # +1 to make it inclusive of the dt_to.
+        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
             self.proc_op_otb_with_allot(dt_date=dt_from + dt.timedelta(days=d))
 
     def proc_op_otb_with_allot_diff(self, dt_date_ref, l_days_diff=[1,3,7]):  # We want 1, 3, 7 days_diff.
@@ -466,7 +506,7 @@ class OperaOTBDataRunner(DataRunner):
 
         self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
 
-        for d in range(int((dt_to - dt_from).days) + 1):  # +1 to make it inclusive of the dt_to.
+        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
             self.proc_op_otb_with_allot_diff(dt_date_ref=dt_from + dt.timedelta(days=d))
 
     def run(self):
@@ -564,7 +604,7 @@ class OTAIDataRunner(DataRunner):
 
         self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
 
-        for d in range(int((dt_to - dt_from).days) + 1):  # +1 to make it inclusive of the dt_to.
+        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
             self.proc_hotel_price_rank(dt_date=dt_from + dt.timedelta(days=d))
 
 
@@ -716,7 +756,7 @@ class OccForecastDataRunner(DataRunner):
 
         self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
 
-        for d in range(int((dt_to - dt_from).days) + 1):  # +1 to make it inclusive of the dt_to.
+        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
             self.proc_occ_forecasts(dt_date=dt_from + dt.timedelta(days=d))
 
     def proc_occ_forecast_mkt_diff(self, dt_date, l_days_diff=[3, 7, 14]):  # Comparative intervals controlled here in l_days_diff parameter.
@@ -798,7 +838,7 @@ class OccForecastDataRunner(DataRunner):
 
         self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
 
-        for d in range(int((dt_to - dt_from).days) + 1):  # +1 to make it inclusive of the dt_to.
+        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
             self.proc_occ_forecast_mkt_diff(dt_date=dt_from + dt.timedelta(days=d))
 
     def proc_occ_forecast_ezrms(self, dt_date=dt.datetime.today()):
@@ -864,7 +904,7 @@ class OccForecastDataRunner(DataRunner):
 
         self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
 
-        for d in range(int((dt_to - dt_from).days) + 1):  # +1 to make it inclusive of the dt_to.
+        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
             self.proc_occ_forecast_ezrms(dt_date=dt_from+dt.timedelta(days=d))
 
     def proc_occ_forecast_ezrms_diff(self, dt_date, l_days_diff=[3, 7, 14]):  # Comparative intervals controlled here in l_days_diff parameter.
@@ -942,7 +982,7 @@ class OccForecastDataRunner(DataRunner):
 
         self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
 
-        for d in range(int((dt_to - dt_from).days) + 1):  # +1 to make it inclusive of the dt_to.
+        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
             self.proc_occ_forecast_ezrms_diff(dt_date=dt_from + dt.timedelta(days=d))
 
     def run(self, dt_date=dt.datetime.today()):
