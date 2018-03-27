@@ -6,7 +6,8 @@ from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataR
 from feh.utils import *
 
 
-TEST_CASE = 'test_load_rates'     ### TEST CASE!
+TEST_CASE = 'test_123'     ### TEST CASE!
+
 if TEST_CASE == 'test_load_rates':
     otai_dr = OTAIDataReader()
     #otai_dr.remove_log_dataload('opera', 'mysql', str_date='2018-02-01')

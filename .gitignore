@@ -3,6 +3,7 @@
 fehdw.conf
 todo.txt
 .ipynb_checkpoints/
+.ipynb
 logs/
 temp/
 test_data/

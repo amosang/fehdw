@@ -677,7 +677,7 @@ class EzrmsDataReader(DataReader):
         driver.switch_to.frame('ezpopupselectwindow')
         driver.find_element_by_xpath('/html/body/table/tbody/tr[3]/td').click()  # Export to TSV. Apparently clicking on the img works, even though there's no on-click event on it.
         time.sleep(8)  # The TSV file downloads asynchronously in a separate process. We need the file to be present before continuing!
-        str_dl_folder = os.path.join(os.getenv('USERPROFILE'), 'Downloads')  # eg: 'C:/Users/feh_admin/Downloads'
+        str_dl_folder = os.path.join(os.getenv('USERPROFILE'), 'Downloads')  # eg: 'Downloads' folder of the user.
         str_fn_with_path, str_fn = get_files(str_folder=str_dl_folder, pattern='table.tsv$', latest_only=True)
 
         self.logger.info('Using as Forecast file: {}'.format(str_fn))

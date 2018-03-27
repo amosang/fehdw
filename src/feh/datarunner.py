@@ -75,7 +75,15 @@ class DataRunner(object):
             self.logger.removeHandler(handler)
 
     def _generic_run_all(self, run_id, l_data_src_tabs, str_func_name, i_dt_from_offset=0, str_dt_from=None, str_dt_to=None):
-        """ Generic method for repeated calling of given method.
+        """ Generic method for repeated calling of a given method.
+        Reduces the amount of repeated code typed, as all the "*_all" methods were observed to have highly similar code, which was extracted out here.
+        :param run_id: This field comes from the calling "*_all" method.
+        :param l_data_src_tabs: Assumes that these tables have "snapshot_dt" column. Will take the smallest intersection of all tables.
+        :param str_func_name: The method name to call repeatedly. Assumes that this method is in the current class.
+        :param i_dt_from_offset: Number of days by which to shift "dt_from" later in time.
+        :param str_dt_from: This field comes from the calling "*_all" method.
+        :param str_dt_to: This field comes from the calling "*_all" method.
+        :return: NA
         """
         dt_from = None
         dt_to = None
@@ -118,8 +126,9 @@ class DataRunner(object):
         """ DEPRECATED.
         20 Mar 2018: If a data load fails, there will already be an alert. The admin should rectify the data load
         issue, then run the "*_all" method, to retroactively generate the data mart records.
-        Duplicate runs on the same snapshot_dt is already taken care of (through SKIPPED).
-        Only previously not run snapshot_dt will be processed.
+
+        Duplicate runs on the same snapshot_dt is already taken care of (through SKIPPED and has_exceeded_datarun_freq() ).
+        Only snapshot_dt that has not been run before, will be processed.
         Therefore, for ease of use, we should avoid putting more constraints in the "proc*" methods.
 
         Check if a data source has been loaded for a given snapshot_dt (usually the value is current date).
@@ -223,7 +232,7 @@ class DataRunner(object):
         For greater control over the process, something which is dropped will be reloaded soonest possible, instead of dropping all tables at once.
         Each logical group of tables will be treated as a set, and dropped as a set.
         """
-        # Create only 1 instance of each class, to avoid having 2 instances of the same class, as this causes
+        # Create only 1 instance of each class, to avoid having 2 simultaneous instances of the same class, as this causes
         # file logger issues (2nd instance unable to get a lock on the log file and hence cannot write to it).
         of_dr = OccForecastDataRunner()
         op_dr = OperaOTBDataRunner()
@@ -368,44 +377,13 @@ class OperaOTBDataRunner(DataRunner):
 
     def proc_op_otb_with_allot_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
-        :param str_dt_from:
-        :param str_dt_to:
-        :return:
         """
         run_id = 'proc_op_otb_with_allot_all'
+        l_data_src_tabs = ['stg_op_otb_nonrev', 'stg_op_cag']
+        str_func_name = 'proc_op_otb_with_allot'
+        self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
 
-        # Setting upper and lower rational bounds on dt_from and dt_to, to avoid unnecessary processing.
-        str_sql = """
-        SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM stg_op_otb_nonrev
-        """
-        sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
-        dt_from = sr['snapshot_dt_min']
-        dt_to = sr['snapshot_dt_max']
-
-        str_sql = """
-        SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM stg_op_cag
-        """
-        sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
-        dt_from_cag = sr['snapshot_dt_min']
-        dt_to_cag = sr['snapshot_dt_max']
-
-        if dt_from_cag > dt_from:  # Get only the part where the date ranges overlap.
-            dt_from = dt_from_cag
-        if dt_to_cag < dt_to:
-            dt_to = dt_to_cag
-
-        # Replace the bounds, only if so desired. Can selectively choose to replace only dt_from OR dt_to.
-        if str_dt_from is not None:
-            dt_from = pd.to_datetime(str_dt_from)
-        if str_dt_to is not None:
-            dt_to = pd.to_datetime(str_dt_to)
-
-        self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
-
-        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
-            self.proc_op_otb_with_allot(dt_date=dt_from + dt.timedelta(days=d))
-
-    def proc_op_otb_with_allot_diff(self, dt_date_ref, l_days_diff=[1,3,7]):  # We want 1, 3, 7 days_diff.
+    def proc_op_otb_with_allot_diff(self, dt_date, l_days_diff=[1, 3, 7]):  # We want 1, 3, 7 days_diff.
         """ Dependent on Table: dm1_op_otb_with_allot, and assumes it has been run up-to-date.
         Pre-computes the pick-up in rm_nts and revenues, between 2 snapshot_dts.
         Note on vocab: "df_new" refers to the data set with snapshot_dt as the "reference date".
@@ -414,7 +392,7 @@ class OperaOTBDataRunner(DataRunner):
         Reads from table: dm1_op_otb_with_allot
         Writes to table: dm2_op_otb_with_allot_diff
 
-        :param dt_date_ref: The reference date, from which we calculate 1/3/7 days before.
+        :param dt_date: The reference date, from which we calculate 1/3/7 days before.
         :param l_days_diff: List of number of days before. Use default values.
         :return: NA
         """
@@ -423,7 +401,7 @@ class OperaOTBDataRunner(DataRunner):
         df_all = DataFrame()
 
         # Read the records pertaining to str_dt_new outside the for-loop, to avoid unnecessary work.
-        str_dt_new = dt.datetime.strftime(dt_date_ref, format='%Y-%m-%d')
+        str_dt_new = dt.datetime.strftime(dt_date, format='%Y-%m-%d')
 
         if self.has_exceeded_datarun_freq(run_id=run_id, str_snapshot_dt=str_dt_new):
             self.logger.info('[{}] SKIPPING. Data already processed for snapshot_dt: {}'.format(run_id, str_date))
@@ -437,7 +415,7 @@ class OperaOTBDataRunner(DataRunner):
                                             'res_bkdroom_ct_lbl', 'rev_marketcode', 'booking_status_code'])[['rev_proj_room_nts', 'rev_rmrev_extax', 'rev_food_rev_inctax', 'rev_oth_rev_inctax']].sum()
 
             for days in l_days_diff:
-                str_dt_old = dt.datetime.strftime(dt_date_ref - dt.timedelta(days=days), format='%Y-%m-%d')
+                str_dt_old = dt.datetime.strftime(dt_date - dt.timedelta(days=days), format='%Y-%m-%d')
                 str_sql = """
                 SELECT * FROM dm1_op_otb_with_allot WHERE snapshot_dt = '{}'
                 """.format(str_dt_old)
@@ -461,7 +439,7 @@ class OperaOTBDataRunner(DataRunner):
                     # Tidying up. Putting in of new columns.
                     df_diff.reset_index(inplace=True, drop=False)
                     df_diff['days_ago'] = days  # New column to store how many days ago
-                    df_diff['snapshot_dt'] = dt_date_ref
+                    df_diff['snapshot_dt'] = dt_date
 
                     df_all = df_all.append(df_diff)
 
@@ -484,128 +462,15 @@ class OperaOTBDataRunner(DataRunner):
 
     def proc_op_otb_with_allot_diff_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
-        :param str_dt_from: Optional
-        :param str_dt_to: Optional
-        :return:
         """
         run_id = 'proc_op_otb_with_allot_diff_all'
-
-        str_sql = """
-        SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM dm1_op_otb_with_allot
-        """
-        sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
-        dt_from = sr['snapshot_dt_min']
-        dt_from = dt_from + dt.timedelta(days=1)  # Increase dt_from by 1, because comparing against 1/3/7 days ago.
-        dt_to = sr['snapshot_dt_max']
-
-        # Replace the bounds, only if so desired. Can selectively choose to replace only dt_from OR dt_to.
-        if str_dt_from is not None:
-            dt_from = pd.to_datetime(str_dt_from)
-        if str_dt_to is not None:
-            dt_to = pd.to_datetime(str_dt_to)
-
-        self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
-
-        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
-            self.proc_op_otb_with_allot_diff(dt_date_ref=dt_from + dt.timedelta(days=d))
+        l_data_src_tabs = ['dm1_op_otb_with_allot']
+        str_func_name = 'proc_op_otb_with_allot_diff'
+        i_dt_from_offset = 1
+        self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to, i_dt_from_offset=i_dt_from_offset)
 
     def run(self):
         pass
-
-
-class OTAIDataRunner(DataRunner):
-    """ For generating relative ranking (by price) of all the hotels in the OTAI compset.
-    Includes FEH's hotels in the ranking as well.
-    Writes the result into a data mart for subsequent visualization.
-    """
-    def __init__(self):
-        super().__init__()
-        self.APP_NAME = self.config['datarunner']['hotel_price_rank']['app_name']
-        self._init_logger(logger_name=self.APP_NAME + '_datareader', app_name=self.APP_NAME)
-
-    def __del__(self):
-        super().__del__()
-        self._free_logger()
-
-    def proc_hotel_price_rank(self, dt_date=dt.datetime.today()):
-        """ Ranks the hotels by price, based on OTAI price data, for a given snapshot_dt (the data comes in by snapshots daily).
-        Highest price has higher rank (ie: smaller number); close-outs get a value of 1. It's okay to share the same rank. There will also be skipped numbers in "rank".
-
-        Reads from tables: stg_otai_rates, stg_otai_hotels
-        Writes to tables: dm1_hotel_price_rank
-
-        :param dt_date:
-        :return: NA
-        """
-        run_id = 'proc_hotel_price_rank'
-
-        str_date_from, str_date_to = feh.utils.split_date(dt_date)
-
-        if self.has_exceeded_datarun_freq(run_id=run_id, str_snapshot_dt=str_date_from):
-            self.logger.info('[{}] SKIPPING. Data already processed for snapshot_dt: {}'.format(run_id, str_date_from))
-        else:
-            str_sql = """
-            SELECT snapshot_dt AS snapshot_dt, ArrivalDate AS stay_date, HotelID AS hotel_id, HotelName AS hotel_name, Value AS price FROM stg_otai_rates
-            WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}'
-            """.format(str_date_from, str_date_to)
-
-            df = pd.read_sql(str_sql, self.conn_fehdw)
-            if len(df) > 0:
-                df['snapshot_dt'] = pd.DatetimeIndex(df['snapshot_dt']).normalize()  # Removes the time component from the DateTime.
-
-                df.loc[df['price'] == 0, 'price'] = 10000  # Use magic number = "10000", to position this as the highest rank.
-                df['rank'] = df.groupby(by=['snapshot_dt', 'stay_date'])['price'].rank(ascending=False, method='min')
-                df.loc[df['price'] == 10000, 'price'] = 0  # Locate the magic numbers, and change them back to 0 (their original value).
-
-                # Create 'stay_date_dow' column.
-                di_dow = {0: 'MON', 1: 'TUE', 2: 'WED', 3: 'THU', 4: 'FRI', 5: 'SAT', 6: 'SUN'}
-                df['stay_date_dow'] = df['stay_date'].dt.dayofweek
-                df['stay_date_dow'] = df['stay_date_dow'].apply(lambda x: str(x) + '-' + di_dow[x])  # So that days of week will be sorted in correct order.
-
-                # BRING IN COMP SET PRICING FOR EACH ROW IN DF #
-                str_sql = "SELECT HotelID AS hotel_id, CompetitorID AS comp_hotel_id, CompetitorName AS comp_hotel_name FROM stg_otai_hotels"
-                df_compset = pd.read_sql(str_sql, self.conn_fehdw)
-
-                # Now each snapshot_dt/stay_date/hotel_id will be multiplied by the number of rows in the compset for that hotel, and gain the comp_hotel_id column.
-                df_merge = df.merge(df_compset, how='left', on=['hotel_id'])
-                df_copy = df[['stay_date', 'hotel_id', 'price']]  # Can do this because df contains the prices for ALL hotels, including compset hotels!
-                df_copy.columns = ['stay_date', 'comp_hotel_id', 'comp_price']  # Rename columns so that easier to merge later.
-                df_merge2 = df_merge.merge(df_copy, how='left', on=['stay_date', 'comp_hotel_id'])
-
-                # WRITE TO DATABASE #
-                df_merge2.to_sql('dm1_hotel_price_rank', self.conn_fehdw, index=False, if_exists='append')
-                self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
-
-                # LOG DATA RUN #
-                self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
-            else:
-                self.logger.error('[{}] No records found in source table for snapshot_dt: {}'.format(run_id, str_date_from))
-
-    def proc_hotel_price_rank_all(self, str_dt_from=None, str_dt_to=None):
-        """ Iterator method for repeated method calling.
-        :param str_dt_from: Optional
-        :param str_dt_to: Optional
-        :return:
-        """
-        run_id = 'proc_hotel_price_rank_all'
-
-        str_sql = """
-        SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM stg_otai_rates
-        """
-        sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
-        dt_from = sr['snapshot_dt_min']
-        dt_to = sr['snapshot_dt_max']
-
-        # Replace the bounds, only if so desired. Can selectively choose to replace only dt_from OR dt_to.
-        if str_dt_from is not None:
-            dt_from = pd.to_datetime(str_dt_from)
-        if str_dt_to is not None:
-            dt_to = pd.to_datetime(str_dt_to)
-
-        self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
-
-        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
-            self.proc_hotel_price_rank(dt_date=dt_from + dt.timedelta(days=d))
 
 
 class OccForecastDataRunner(DataRunner):
@@ -717,47 +582,9 @@ class OccForecastDataRunner(DataRunner):
         Set str_dt_from = str_dt_to, if you want to run this 1 day at a time in steady state.
         """
         run_id = 'proc_occ_forecasts_all'
-
-        # Setting upper and lower rational bounds on dt_from and dt_to, to avoid unnecessary processing #
-        str_sql = """
-        SELECT DATE(MIN(snapshot_dt)) AS snapshot_dt_min, DATE(MAX(snapshot_dt)) AS snapshot_dt_max FROM stg_ezrms_forecast
-        """
-        sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
-        dt_from_ezrms = sr['snapshot_dt_min']
-        dt_to_ezrms = sr['snapshot_dt_max']
-
-        str_sql = """
-        SELECT DATE(MIN(snapshot_dt)) AS snapshot_dt_min, DATE(MAX(snapshot_dt)) AS snapshot_dt_max FROM stg_fwk_proj
-        """
-        sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
-        dt_from_fwk = sr['snapshot_dt_min']
-        dt_to_fwk = sr['snapshot_dt_max']
-
-        # Determine INTERSECTION of from and to dates, for both ezrms and fwk.
-        if dt_from_ezrms < dt_from_fwk:
-            dt_from = dt_from_fwk
-        else:
-            dt_from = dt_from_ezrms
-
-        if dt_to_ezrms < dt_to_fwk:
-            dt_to = dt_to_ezrms
-        else:
-            dt_to = dt_to_fwk
-
-        # Standardize data types to datetime class, instead of datetime.date class, so that subsequent handling is consistent.
-        dt_from = pd.to_datetime(dt_from)
-        dt_to = pd.to_datetime(dt_to)
-
-        # Replace the bounds, only if so desired. Can selectively choose to overwrite only dt_from OR dt_to.
-        if str_dt_from is not None:
-            dt_from = pd.to_datetime(str_dt_from)
-        if str_dt_to is not None:
-            dt_to = pd.to_datetime(str_dt_to)
-
-        self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
-
-        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
-            self.proc_occ_forecasts(dt_date=dt_from + dt.timedelta(days=d))
+        l_data_src_tabs = ['stg_ezrms_forecast', 'stg_fwk_proj']
+        str_func_name = 'proc_occ_forecasts'
+        self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
 
     def proc_occ_forecast_mkt_diff(self, dt_date, l_days_diff=[3, 7, 14]):  # Comparative intervals controlled here in l_days_diff parameter.
         """ Pre-computes the difference in market (ie: FWK) forecast, between 2 snapshot_dts, for the interval periods given in l_days_diff.
@@ -816,30 +643,12 @@ class OccForecastDataRunner(DataRunner):
 
     def proc_occ_forecast_mkt_diff_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
-        :param str_dt_from:
-        :param str_dt_to:
-        :return: NA
         """
         run_id = 'proc_occ_forecast_mkt_diff_all'
-
-        # Setting upper and lower rational bounds on dt_from and dt_to, to avoid unnecessary processing #
-        str_sql = """
-        SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM dm1_occ_forecasts_ezrms_mkt
-        """
-        sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
-        dt_from = sr['snapshot_dt_min'] + dt.timedelta(days=3)  # Shift by 3 days, because we want a look-back of at least 3 days.
-        dt_to = sr['snapshot_dt_max']
-
-        # Replace the bounds, only if so desired. Can selectively choose to replace only dt_from OR dt_to.
-        if str_dt_from is not None:
-            dt_from = pd.to_datetime(str_dt_from)
-        if str_dt_to is not None:
-            dt_to = pd.to_datetime(str_dt_to)
-
-        self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
-
-        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
-            self.proc_occ_forecast_mkt_diff(dt_date=dt_from + dt.timedelta(days=d))
+        l_data_src_tabs = ['dm1_occ_forecasts_ezrms_mkt']
+        str_func_name = 'proc_occ_forecast_mkt_diff'
+        i_dt_from_offset = 3
+        self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to, i_dt_from_offset=i_dt_from_offset)
 
     def proc_occ_forecast_ezrms(self, dt_date=dt.datetime.today()):
         """ Processes the EzRMS data into a form that is suitable for visualization, for the 1 given date only.
@@ -882,30 +691,11 @@ class OccForecastDataRunner(DataRunner):
 
     def proc_occ_forecast_ezrms_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
-        :param str_dt_from: Optional
-        :param str_dt_to: Optional
-        :return:
         """
         run_id = 'proc_occ_forecast_ezrms_all'
-
-        # Setting upper and lower rational bounds on dt_from and dt_to, to avoid unnecessary processing #
-        str_sql = """
-        SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM stg_ezrms_forecast
-        """
-        sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
-        dt_from = sr['snapshot_dt_min']
-        dt_to = sr['snapshot_dt_max']
-
-        # Replace the bounds, only if so desired. Can selectively choose to overwrite only dt_from OR dt_to.
-        if str_dt_from is not None:
-            dt_from = pd.to_datetime(str_dt_from)
-        if str_dt_to is not None:
-            dt_to = pd.to_datetime(str_dt_to)
-
-        self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
-
-        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
-            self.proc_occ_forecast_ezrms(dt_date=dt_from+dt.timedelta(days=d))
+        l_data_src_tabs = ['stg_ezrms_forecast']
+        str_func_name = 'proc_occ_forecast_ezrms'
+        self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
 
     def proc_occ_forecast_ezrms_diff(self, dt_date, l_days_diff=[3, 7, 14]):  # Comparative intervals controlled here in l_days_diff parameter.
         """ Pre-computes the difference in EzRMS forecast, between 2 snapshot_dts, for the interval periods given in l_days_diff.
@@ -960,30 +750,12 @@ class OccForecastDataRunner(DataRunner):
 
     def proc_occ_forecast_ezrms_diff_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
-        :param str_dt_from: Optional
-        :param str_dt_to: Optional
-        :return: NA
         """
         run_id = 'proc_occ_forecast_ezrms_diff_all'
-
-        # Setting upper and lower rational bounds on dt_from and dt_to, to avoid unnecessary processing #
-        str_sql = """
-        SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM dm1_occ_forecast_ezrms
-        """
-        sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
-        dt_from = sr['snapshot_dt_min'] + dt.timedelta(days=3)  # Shift by 3 days, because we want a look-back of at least 3 days.
-        dt_to = sr['snapshot_dt_max']
-
-        # Replace the bounds, only if so desired. Can selectively choose to replace only dt_from OR dt_to.
-        if str_dt_from is not None:
-            dt_from = pd.to_datetime(str_dt_from)
-        if str_dt_to is not None:
-            dt_to = pd.to_datetime(str_dt_to)
-
-        self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
-
-        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
-            self.proc_occ_forecast_ezrms_diff(dt_date=dt_from + dt.timedelta(days=d))
+        l_data_src_tabs = ['dm1_occ_forecast_ezrms']
+        str_func_name = 'proc_occ_forecast_ezrms_diff'
+        i_dt_from_offset = 3
+        self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to, i_dt_from_offset=i_dt_from_offset)
 
     def run(self, dt_date=dt.datetime.today()):
         # In steady state, no need to supply dt_date; can just use default of today().
@@ -1011,3 +783,99 @@ class OccForecastDataRunner(DataRunner):
         else:
             self.logger.error('Missing load for EzRMS Forecast data for today.')
 
+
+class OTAIDataRunner(DataRunner):
+    """ For generating relative ranking (by price) of all the hotels in the OTAI compset.
+    Includes FEH's hotels in the ranking as well.
+    Writes the result into a data mart for subsequent visualization.
+    """
+    def __init__(self):
+        super().__init__()
+        self.APP_NAME = self.config['datarunner']['hotel_price_rank']['app_name']
+        self._init_logger(logger_name=self.APP_NAME + '_datareader', app_name=self.APP_NAME)
+
+    def __del__(self):
+        super().__del__()
+        self._free_logger()
+
+    def proc_hotel_price_rank(self, dt_date=dt.datetime.today()):
+        """ Ranks the hotels by price, based on OTAI price data, for a given snapshot_dt (the data comes in by snapshots daily).
+        Highest price has higher rank (ie: smaller number); close-outs get a value of 1. It's okay to share the same rank. There will also be skipped numbers in "rank".
+
+        Reads from tables: stg_otai_rates, stg_otai_hotels
+        Writes to tables: dm1_hotel_price_rank
+
+        :param dt_date:
+        :return: NA
+        """
+        run_id = 'proc_hotel_price_rank'
+
+        str_date_from, str_date_to = feh.utils.split_date(dt_date)
+
+        if self.has_exceeded_datarun_freq(run_id=run_id, str_snapshot_dt=str_date_from):
+            self.logger.info('[{}] SKIPPING. Data already processed for snapshot_dt: {}'.format(run_id, str_date_from))
+        else:
+            str_sql = """
+            SELECT snapshot_dt AS snapshot_dt, ArrivalDate AS stay_date, HotelID AS hotel_id, HotelName AS hotel_name, Value AS price FROM stg_otai_rates
+            WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}'
+            """.format(str_date_from, str_date_to)
+
+            df = pd.read_sql(str_sql, self.conn_fehdw)
+            if len(df) > 0:
+                df['snapshot_dt'] = pd.DatetimeIndex(df['snapshot_dt']).normalize()  # Removes the time component from the DateTime.
+
+                df.loc[df['price'] == 0, 'price'] = 10000  # Use magic number = "10000", to position this as the highest rank.
+                df['rank'] = df.groupby(by=['snapshot_dt', 'stay_date'])['price'].rank(ascending=False, method='min')
+                df.loc[df['price'] == 10000, 'price'] = 0  # Locate the magic numbers, and change them back to 0 (their original value).
+
+                # Create 'stay_date_dow' column.
+                di_dow = {0: 'MON', 1: 'TUE', 2: 'WED', 3: 'THU', 4: 'FRI', 5: 'SAT', 6: 'SUN'}
+                df['stay_date_dow'] = df['stay_date'].dt.dayofweek
+                df['stay_date_dow'] = df['stay_date_dow'].apply(lambda x: str(x) + '-' + di_dow[x])  # So that days of week will be sorted in correct order.
+
+                # BRING IN COMP SET PRICING FOR EACH ROW IN DF #
+                str_sql = "SELECT HotelID AS hotel_id, CompetitorID AS comp_hotel_id, CompetitorName AS comp_hotel_name FROM stg_otai_hotels"
+                df_compset = pd.read_sql(str_sql, self.conn_fehdw)
+
+                # Now each snapshot_dt/stay_date/hotel_id will be multiplied by the number of rows in the compset for that hotel, and gain the comp_hotel_id column.
+                df_merge = df.merge(df_compset, how='left', on=['hotel_id'])
+                df_copy = df[['stay_date', 'hotel_id', 'price']]  # Can do this because df contains the prices for ALL hotels, including compset hotels!
+                df_copy.columns = ['stay_date', 'comp_hotel_id', 'comp_price']  # Rename columns so that easier to merge later.
+                df_merge2 = df_merge.merge(df_copy, how='left', on=['stay_date', 'comp_hotel_id'])
+
+                # Bring in the "old hotel code" column. For merging use later in the viz level.
+                str_sql = """
+                SELECT otai_hotel_id AS hotel_id, old_code AS hotel_code FROM cfg_map_properties
+                WHERE operator = 'feh' AND asset_type = 'hotel'
+                """
+                df_hotel_codes = pd.read_sql(str_sql, self.conn_fehdw)
+                df_merge3 = df_merge2.merge(df_hotel_codes, how='left', on=['hotel_id'])
+                df_merge3 = df_merge3[['snapshot_dt', 'stay_date', 'hotel_id', 'hotel_code', 'hotel_name', 'price',
+                                       'rank', 'stay_date_dow', 'comp_hotel_id', 'comp_hotel_name', 'comp_price']]
+                # WRITE TO DATABASE #
+                df_merge3.to_sql('dm1_hotel_price_rank', self.conn_fehdw, index=False, if_exists='append')
+                self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
+
+                # LOG DATA RUN #
+                self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+            else:
+                self.logger.error('[{}] No records found in source table for snapshot_dt: {}'.format(run_id, str_date_from))
+
+    def proc_hotel_price_rank_all(self, str_dt_from=None, str_dt_to=None):
+        """ Iterator method for repeated method calling.
+        """
+        run_id = 'proc_hotel_price_rank_all'
+        l_data_src_tabs = ['stg_otai_rates']
+        str_func_name = 'proc_hotel_price_rank'
+        self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
+
+    def run(self, dt_date=dt.datetime.today()):
+        # In steady state, no need to supply dt_date; can just use default of today().
+        # has_been_loaded() -> dt_date defaults to today()
+
+        str_date = dt.datetime.strftime(dt_date, format='%Y-%m-%d')
+
+        if self.has_been_loaded(source='otai', dest='mysql', file='rates'):
+            self.proc_hotel_price_rank(dt_date=dt_date)  # Do data run for current date.
+        else:
+            self.logger.error('Missing data load for {} data for snapshot_dt: {}.'.format('OTAI Rates', str_date))

@@ -86,6 +86,28 @@ def check_dataload_not_logged(t_timenow, conn):
         arb.send(str_listname='fehdw_admin', str_subject=str_subject, df=df_out, str_msg=str_msg, str_msg2=str_msg2)
 
 
+def get_datarun_sched(run_id, conn):
+    """ Given a run_id key, read config table to get a time range.
+    For use in controlling when scheduled jobs are supposed to run.
+    :param run_id:
+    :param conn: DB connection.
+    :return: 2 Time objects.
+    """
+    str_sql = """
+    SELECT * FROM sys_cfg_datarun_sched
+    WHERE run_id = '{}'
+    """.format(run_id)
+    df = pd.read_sql(str_sql, conn)
+
+    if len(df) > 0:  # Should be at least 1 record. We'll just take the first one.
+        time_from = df['time_from'][0]
+        time_to = df['time_to'][0]
+
+        t_from = dt.time(int(time_from[:2]), int(time_from[2:]))
+        t_to = dt.time(int(time_to[:2]), int(time_to[2:]))
+
+        return t_from, t_to
+
 def get_dataload_sched(source, dest, file, conn):
     """ Given a source/dest/file key, read config table to get a time range.
     For use in controlling when scheduled jobs are supposed to run.
