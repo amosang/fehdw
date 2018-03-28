@@ -10,7 +10,7 @@ from pandas import DataFrame
 
 # Important! We use ReportBot to send admin error emails. As ReportBot resides in another project, we add
 # that project's path to sys.path, in order to make use of those functionalities there.
-# PyCharm will say that the path cannot be resolved, but it still works.
+# PyCharm will indicate that the path cannot be resolved, but it still works.
 sys.path.insert(0, 'C:/webapps')  # Insert parent dir into path.
 from report_bot.report_bot import AdminReportBot
 

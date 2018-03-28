@@ -309,7 +309,9 @@ class OperaOTBDataRunner(DataRunner):
     def proc_op_otb_with_allot(self, dt_date):
         """ For a given snapshot_dt, generate the Opera OTB, including those entries in the CAG file (Groups and Wholesale).
         From Opera, take the rev+nonrev parts and combine them. Then append the CAG file entries.
+
         Reads from tables: stg_op_otb_nonrev, stg_op_otb_rev, stg_op_cag.
+        Writes to tables: dm1_op_otb_with_allot
         :param dt_date:
         :return:
         """
@@ -404,7 +406,7 @@ class OperaOTBDataRunner(DataRunner):
         str_dt_new = dt.datetime.strftime(dt_date, format='%Y-%m-%d')
 
         if self.has_exceeded_datarun_freq(run_id=run_id, str_snapshot_dt=str_dt_new):
-            self.logger.info('[{}] SKIPPING. Data already processed for snapshot_dt: {}'.format(run_id, str_date))
+            self.logger.info('[{}] SKIPPING. Data already processed for snapshot_dt: {}'.format(run_id, str_dt_new))
         else:
             str_sql = """
             SELECT * FROM dm1_op_otb_with_allot WHERE snapshot_dt = '{}'
@@ -570,7 +572,7 @@ class OccForecastDataRunner(DataRunner):
                 df_merge = df_ezrms.merge(df_fwk, how='inner', on=['snapshot_dt', 'stay_date'], suffixes=('_ezrms', '_fwk'))
                 # WRITE TO DATABASE #
                 df_merge.to_sql('dm1_occ_forecasts_ezrms_mkt', self.conn_fehdw, index=False, if_exists='append')
-                self.logger.info('[{}] Completed successfully for snapshot_dt: {}'.format(run_id, str_date_from))
+                self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
 
             # LOG DATA RUN #
             self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
@@ -867,6 +869,65 @@ class OTAIDataRunner(DataRunner):
         run_id = 'proc_hotel_price_rank_all'
         l_data_src_tabs = ['stg_otai_rates']
         str_func_name = 'proc_hotel_price_rank'
+        self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
+
+    def proc_hotel_price_otb_evolution(self, dt_date=dt.datetime.today()):
+        """ Creates the data mart which supports the viz showing how 1) FEH Hotel Price, and 2) OTB Occ, evolves over snapshot_dts.
+
+        Reads from tables: stg_otai_rates, dm1_op_otb_with_allot, cfg_map_properties
+        Writes to tables: dm2_hotel_price_otb_evolution
+
+        :param dt_date:
+        :return: NA
+        """
+        run_id = 'proc_hotel_price_otb_evolution'
+        str_date_from, str_date_to = feh.utils.split_date(dt_date)
+
+        if self.has_exceeded_datarun_freq(run_id=run_id, str_snapshot_dt=str_date_from):
+            self.logger.info('[{}] SKIPPING. Data already processed for snapshot_dt: {}'.format(run_id, str_date_from))
+        else:
+            # Get OTB #
+            str_sql_otb = """
+            SELECT A.*, B.room_inventory, B.otai_hotel_id FROM 
+            (SELECT snapshot_dt, stay_date, hotel_code, booking_status_code, rev_marketcode, rev_proj_room_nts FROM dm1_op_otb_with_allot) AS A
+            INNER JOIN
+            (SELECT old_code AS hotel_code, otai_hotel_id, hotel_name, room_inventory FROM cfg_map_properties
+            WHERE operator = 'feh' AND asset_type = 'hotel') AS B
+            ON A.hotel_code = B.hotel_code
+            WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}'
+            """.format(str_date_from, str_date_to)
+
+            df_otb = pd.read_sql(str_sql_otb, self.conn_fehdw)
+
+            # Get OTAI Prices #
+            str_sql_otai = """
+            SELECT HotelID AS otai_hotel_id, ArrivalDate AS stay_date, Value AS price FROM stg_otai_rates
+            WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}'
+            """.format(str_date_from, str_date_to)
+
+            df_otai = pd.read_sql(str_sql_otai, self.conn_fehdw)
+
+            if (len(df_otb) > 0) & (len(df_otai) > 0):
+                df_merge = df_otb.merge(df_otai, how='inner', on=['otai_hotel_id', 'stay_date'])
+
+                # WRITE TO DATABASE #
+                df_merge.to_sql('dm2_hotel_price_otb_evolution', self.conn_fehdw, index=False, if_exists='append')
+                self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
+
+                # LOG DATA RUN #
+                self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+            else:
+                self.logger.error('[{}] No records found in source tables for snapshot_dt: {}'.format(run_id, str_date_from))
+
+    def proc_hotel_price_otb_evolution_all(self, str_dt_from=None, str_dt_to=None):
+        """ Iterator method for repeated method calling.
+        Note: For this case, we still want tables ['stg_otai_rates', 'dm1_op_otb_with_allot'] to have their snapshot_dts
+        to be in alignment, so that you can see the Price and Occ OTB for the same snapshot_dts.
+        Hence it is okay to use _generic_run_all() to process them (it looks for intersection of snapshot_dt ranges.
+        """
+        run_id = 'proc_hotel_price_otb_evolution_all'
+        l_data_src_tabs = ['stg_otai_rates', 'dm1_op_otb_with_allot']
+        str_func_name = 'proc_hotel_price_otb_evolution'
         self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
 
     def run(self, dt_date=dt.datetime.today()):
