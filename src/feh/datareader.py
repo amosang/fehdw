@@ -181,8 +181,7 @@ class OperaDataReader(DataReader):
         - (DONE) Reservation Analytics 11Jul15 fwd 60 days.xlsx
         - (DONE) Reservation Analytics 11Jul15 fwd 61 days.xlsx
         - (DONE) Reservation Analytics RES -History.xlsx
-        # TODO Remaining 2 Opera files. Lower priority since not really used.
-        - (ON HOLD. NOT REALLY USED) CAG.xlsx
+        - (DONE) CAG.xlsx
         - (ON HOLD. NOT REALLY USED) Reservation Analytics 20 Jul15 Fwd Cancellations.xlsx
     """
     def __init__(self):

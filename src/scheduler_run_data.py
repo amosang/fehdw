@@ -19,7 +19,9 @@ TIME_NOW = dt.datetime.now().time()  # Jobs to run within specific time windows
 dt_date = dt.datetime.today()
 str_date = dt.datetime.strftime(dt_date, format='%Y-%m-%d')
 
+############
 DEBUG = False  # SET BACK TO FALSE AFTER TESTING!
+############
 
 # NOTE: METHOD CALLS ARE PLACED IN DEPENDENCY SEQUENCE; DO NOT CHANGE! #
 

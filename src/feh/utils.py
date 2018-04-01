@@ -150,7 +150,7 @@ def split_date(dt_date=dt.datetime.today(), days=1):
 def dec_err_handler(retries=0):
     """
     Decorator function to handle logging and retries.
-    Usage: Call without the retries parameter to have it log exceptions only.
+    Usage: Call without the retries parameter to have it log exceptions only, without retrying.
     Assumptions: 1) args[0] is "self", and "self.logger" has been instantiated.
     Ref: https://stackoverflow.com/questions/11731136/python-class-method-decorator-with-self-arguments
     :retries: Number of times to retry, in addition to original try.
@@ -173,8 +173,7 @@ def dec_err_handler(retries=0):
                     logger.error(ex)
                     break  # Do not retry multiple times, if problem was due to this Exception.
                 except Exception as ex:
-                    # To only log exceptions.
-                    logger.error(ex)
+                    logger.error(ex)  # Logging all uncaught exceptions from the called function/method.
                     time.sleep(2 ** i)  # Exponential backoff. Pause processing for an increasing number of seconds, with each error.
 
         wrapped_err_handler.__name__ = f.__name__  # Nicety. Rename the error handler function name to that of the wrapped function.

@@ -306,6 +306,7 @@ class OperaOTBDataRunner(DataRunner):
         super().__del__()
         self._free_logger()
 
+    @dec_err_handler(retries=0)
     def proc_op_otb_with_allot(self, dt_date):
         """ For a given snapshot_dt, generate the Opera OTB, including those entries in the CAG file (Groups and Wholesale).
         From Opera, take the rev+nonrev parts and combine them. Then append the CAG file entries.
@@ -377,6 +378,7 @@ class OperaOTBDataRunner(DataRunner):
                 self.logger.error(
                     '[{}] No records found in source tables for snapshot_dt: {}'.format(run_id, str_date_from))
 
+    @dec_err_handler(retries=0)
     def proc_op_otb_with_allot_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
         """
@@ -385,6 +387,7 @@ class OperaOTBDataRunner(DataRunner):
         str_func_name = 'proc_op_otb_with_allot'
         self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
 
+    @dec_err_handler(retries=0)
     def proc_op_otb_with_allot_diff(self, dt_date, l_days_diff=[1, 3, 7]):  # We want 1, 3, 7 days_diff.
         """ Dependent on Table: dm1_op_otb_with_allot, and assumes it has been run up-to-date.
         Pre-computes the pick-up in rm_nts and revenues, between 2 snapshot_dts.
@@ -462,6 +465,7 @@ class OperaOTBDataRunner(DataRunner):
             # LOG DATA RUN #
             self.log_datarun(run_id=run_id, str_snapshot_dt=str_dt_new)
 
+    @dec_err_handler(retries=0)
     def proc_op_otb_with_allot_diff_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
         """
@@ -518,6 +522,7 @@ class OccForecastDataRunner(DataRunner):
 
         return y
 
+    @dec_err_handler(retries=0)
     def proc_occ_forecasts(self, dt_date=dt.datetime.today()):
         """ Generates data mart with BOTH EzRMS forecast and FWK's market forecast for viz use.
         Uses FWK's predicted demand to calculate the Forecasted Mkt Occ Rate.
@@ -577,6 +582,7 @@ class OccForecastDataRunner(DataRunner):
             # LOG DATA RUN #
             self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
 
+    @dec_err_handler(retries=0)
     def proc_occ_forecasts_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
         Given a range of dates, to run proc_occ_forecasts() 1 date at a time. Inclusive of both dates.
@@ -588,6 +594,7 @@ class OccForecastDataRunner(DataRunner):
         str_func_name = 'proc_occ_forecasts'
         self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
 
+    @dec_err_handler(retries=0)
     def proc_occ_forecast_mkt_diff(self, dt_date, l_days_diff=[3, 7, 14]):  # Comparative intervals controlled here in l_days_diff parameter.
         """ Pre-computes the difference in market (ie: FWK) forecast, between 2 snapshot_dts, for the interval periods given in l_days_diff.
         Reads from dm1_occ_forecasts_ezrms_mkt because the FWK data there is already nicely processed.
@@ -643,6 +650,7 @@ class OccForecastDataRunner(DataRunner):
             df_all.to_sql('dm2_occ_forecast_mkt_diff', self.conn_fehdw, index=False, if_exists='append')
             self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date))
 
+    @dec_err_handler(retries=0)
     def proc_occ_forecast_mkt_diff_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
         """
@@ -652,6 +660,7 @@ class OccForecastDataRunner(DataRunner):
         i_dt_from_offset = 3
         self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to, i_dt_from_offset=i_dt_from_offset)
 
+    @dec_err_handler(retries=0)
     def proc_occ_forecast_ezrms(self, dt_date=dt.datetime.today()):
         """ Processes the EzRMS data into a form that is suitable for visualization, for the 1 given date only.
         This is very similar to proc_occ_forecasts(), but was created so as not to have a dependency on having FWK data,
@@ -691,6 +700,7 @@ class OccForecastDataRunner(DataRunner):
             # LOG DATARUN #
             self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
 
+    @dec_err_handler(retries=0)
     def proc_occ_forecast_ezrms_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
         """
@@ -699,6 +709,7 @@ class OccForecastDataRunner(DataRunner):
         str_func_name = 'proc_occ_forecast_ezrms'
         self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
 
+    @dec_err_handler(retries=0)
     def proc_occ_forecast_ezrms_diff(self, dt_date, l_days_diff=[3, 7, 14]):  # Comparative intervals controlled here in l_days_diff parameter.
         """ Pre-computes the difference in EzRMS forecast, between 2 snapshot_dts, for the interval periods given in l_days_diff.
         :param dt_date:
@@ -750,6 +761,7 @@ class OccForecastDataRunner(DataRunner):
             # LOG DATA RUN #
             self.log_datarun(run_id=run_id, str_snapshot_dt=str_date)
 
+    @dec_err_handler(retries=0)
     def proc_occ_forecast_ezrms_diff_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
         """
@@ -800,6 +812,7 @@ class OTAIDataRunner(DataRunner):
         super().__del__()
         self._free_logger()
 
+    @dec_err_handler(retries=0)
     def proc_hotel_price_rank(self, dt_date=dt.datetime.today()):
         """ Ranks the hotels by price, based on OTAI price data, for a given snapshot_dt (the data comes in by snapshots daily).
         Highest price has higher rank (ie: smaller number); close-outs get a value of 1. It's okay to share the same rank. There will also be skipped numbers in "rank".
@@ -863,6 +876,7 @@ class OTAIDataRunner(DataRunner):
             else:
                 self.logger.error('[{}] No records found in source table for snapshot_dt: {}'.format(run_id, str_date_from))
 
+    @dec_err_handler(retries=0)
     def proc_hotel_price_rank_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
         """
@@ -871,6 +885,7 @@ class OTAIDataRunner(DataRunner):
         str_func_name = 'proc_hotel_price_rank'
         self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
 
+    @dec_err_handler(retries=0)
     def proc_hotel_price_otb_evolution(self, dt_date=dt.datetime.today()):
         """ Creates the data mart which supports the viz showing how 1) FEH Hotel Price, and 2) OTB Occ, evolves over snapshot_dts.
 
@@ -919,6 +934,7 @@ class OTAIDataRunner(DataRunner):
             else:
                 self.logger.error('[{}] No records found in source tables for snapshot_dt: {}'.format(run_id, str_date_from))
 
+    @dec_err_handler(retries=0)
     def proc_hotel_price_otb_evolution_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.
         Note: For this case, we still want tables ['stg_otai_rates', 'dm1_op_otb_with_allot'] to have their snapshot_dts
