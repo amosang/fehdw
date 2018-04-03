@@ -475,8 +475,73 @@ class OperaOTBDataRunner(DataRunner):
         i_dt_from_offset = 1
         self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to, i_dt_from_offset=i_dt_from_offset)
 
-    def run(self):
-        pass
+    def proc_target_adr_with_otb_price_fc(self, dt_date=dt.datetime.today()):
+        """ Creates the data mart for the "Target ADR" viz, which pulls data need to calculate occ and adr (from Opera), hotel pricing, and forecasts (ezrms & mkt).
+
+        Reads from tables: cfg_map_properties, dm1_op_otb_with_allot, dm1_occ_forecasts_ezrms_mkt, dm1_hotel_price_rank
+        Writes to tables: dm2_adr_occ_fc_price
+
+        :param dt_date:
+        :return:
+        """
+        run_id = 'proc_target_adr_with_otb_price_fc'
+
+        str_date_from, str_date_to = feh.utils.split_date(dt_date)
+
+        if self.has_exceeded_datarun_freq(run_id=run_id, str_snapshot_dt=str_date_from):
+            self.logger.info('[{}] SKIPPING. Data already processed for snapshot_dt: {}'.format(run_id, str_date_from))
+        else:
+            # Get combined ADR/OCC data #
+            str_sql_adr_occ = """
+            SELECT A.*, B.peak_occ_med_adr_feh, B.peak_occ_med_adr_compset FROM 
+            (SELECT snapshot_dt, stay_date, hotel_code, booking_status_code, rev_marketcode, rev_proj_room_nts, rev_rmrev_extax FROM dm1_op_otb_with_allot) AS A
+            INNER JOIN
+            (SELECT old_code AS hotel_code, peak_occ_med_adr_feh, peak_occ_med_adr_compset FROM cfg_map_properties
+            WHERE operator = 'feh' AND asset_type = 'hotel') AS B
+            ON A.hotel_code = B.hotel_code
+            WHERE A.rev_proj_room_nts > 0  -- Drop these records, because they are not needed. More efficient. There's a small chance its presence might affect the denominator and thus occupancy.
+            AND A.snapshot_dt >= '{}' AND A.snapshot_dt < '{}'    
+            """.format(str_date_from, str_date_to)
+
+            df_adr_occ = pd.read_sql(str_sql_adr_occ, self.conn_fehdw)
+
+            # Get forecasts (EzRMS and Market).
+            str_sql_fc = """
+            SELECT * FROM dm1_occ_forecasts_ezrms_mkt
+            WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}'
+            """.format(str_date_from, str_date_to)
+
+            df_fc = pd.read_sql(str_sql_fc, self.conn_fehdw)
+
+            df_merge = df_adr_occ.merge(df_fc, how='inner', on=['snapshot_dt', 'stay_date', 'hotel_code'])
+
+            # Get Prices. FEH hotels only. Hence "hotel_code IS NOT NULL".
+            # Need DISTINCT, so as not to get duplicates. We don't want the compset-related columns as well.
+            str_sql_price_rank = """
+            SELECT DISTINCT snapshot_dt, stay_date, hotel_code, hotel_id, hotel_name, price FROM dm1_hotel_price_rank
+            WHERE hotel_code IS NOT NULL
+            AND snapshot_dt = '{}'
+            """.format(str_date_from)
+
+            df_price_rank = pd.read_sql(str_sql_price_rank, self.conn_fehdw)
+
+            df_merge2 = df_merge.merge(df_price_rank, how='inner', on=['snapshot_dt', 'stay_date', 'hotel_code'])
+
+            # WRITE TO DATABASE #
+            df_merge2.to_sql('dm2_adr_occ_fc_price', self.conn_fehdw, index=False, if_exists='append')
+            self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
+
+            # LOG DATA RUN #
+            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+
+    @dec_err_handler(retries=0)
+    def proc_target_adr_with_otb_price_fc_all(self, str_dt_from=None, str_dt_to=None):
+        """ Iterator method for repeated method calling.
+        """
+        run_id = 'proc_target_adr_with_otb_price_fc_all'
+        l_data_src_tabs = ['dm1_op_otb_with_allot', 'dm1_occ_forecasts_ezrms_mkt', 'dm1_hotel_price_rank']
+        str_func_name = 'proc_target_adr_with_otb_price_fc'
+        self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
 
 
 class OccForecastDataRunner(DataRunner):
@@ -852,7 +917,7 @@ class OTAIDataRunner(DataRunner):
                 str_sql = "SELECT HotelID AS hotel_id, CompetitorID AS comp_hotel_id, CompetitorName AS comp_hotel_name FROM stg_otai_hotels"
                 df_compset = pd.read_sql(str_sql, self.conn_fehdw)
 
-                # Now each snapshot_dt/stay_date/hotel_id will be multiplied by the number of rows in the compset for that hotel, and gain the comp_hotel_id column.
+                # LEFT JOINS. Now each snapshot_dt/stay_date/hotel_id will be multiplied by the number of rows in the compset for that hotel, and gain the comp_hotel_id column.
                 df_merge = df.merge(df_compset, how='left', on=['hotel_id'])
                 df_copy = df[['stay_date', 'hotel_id', 'price']]  # Can do this because df contains the prices for ALL hotels, including compset hotels!
                 df_copy.columns = ['stay_date', 'comp_hotel_id', 'comp_price']  # Rename columns so that easier to merge later.

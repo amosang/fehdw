@@ -60,6 +60,7 @@ if DEBUG | (t_from <= TIME_NOW < t_to):
 # proc_occ_forecast_ezrms
 # proc_occ_forecast_ezrms_diff
 # proc_occ_forecast_mkt_diff
+# proc_target_adr_with_otb_price_fc
 
 # run_id: proc_occ_forecasts #
 t_from, t_to = feh.utils.get_datarun_sched(run_id='proc_occ_forecasts', conn=d_run.conn_fehdw)
@@ -81,11 +82,15 @@ t_from, t_to = feh.utils.get_datarun_sched(run_id='proc_occ_forecast_mkt_diff', 
 if DEBUG | (t_from <= TIME_NOW < t_to):
     of_drun.proc_occ_forecast_mkt_diff(dt_date=dt_date)
 
+# run_id: proc_target_adr_with_otb_price_fc #
+t_from, t_to = feh.utils.get_datarun_sched(run_id='proc_target_adr_with_otb_price_fc', conn=d_run.conn_fehdw)
+if DEBUG | (t_from <= TIME_NOW < t_to):
+    op_drun.proc_target_adr_with_otb_price_fc(dt_date=dt_date)
 
 
-# CHECK IF DATA LOAD HAS COMPLETED SUCCESSFULLY #
-# Technique: In each half hour time slot, the code above will load data, and must create a log entry if successful.
-# This check uses the presence of a corresponding log entry to determine if a data load is successful.
+# CHECK IF DATA RUN HAS COMPLETED SUCCESSFULLY #
+# Technique: In each half hour time slot, the code above will run data, and must create a log entry if successful.
+# This check uses the presence of a corresponding log entry to determine if a data run is successful.
 # If unsuccessful, an email is sent to the mailing list "fehdw_admin". Comment out below line to disable, if necessary.
 # If successful, an email is sent to the Revenue Manager mailing list, to inform them that the data mart is ready to be used.
 
