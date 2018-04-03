@@ -86,6 +86,81 @@ def check_dataload_not_logged(t_timenow, conn):
         arb.send(str_listname='fehdw_admin', str_subject=str_subject, df=df_out, str_msg=str_msg, str_msg2=str_msg2)
 
 
+def check_datarun_not_logged(t_timenow, conn):
+    """ This is called from scheduler_run_data.py. Given a Time, check the scheduled data run table to see
+    which jobs are supposed to have run, then look up the data run logs table to look for corresponding entries.
+    If corresponding entries do not exist, this means that the run must have failed.
+    :param t_timenow:
+    :param conn:
+    :return:
+    """
+    # Return df of "sched" rows where log entry not found for today.
+    df_out_err = DataFrame()
+    df_out_ok = DataFrame()
+    str_date_from, str_date_to = split_date()  # today's date.
+
+    str_sql = """
+    SELECT * FROM sys_cfg_datarun_sched ORDER BY seq
+    """
+    df_sched = pd.read_sql(str_sql, conn)
+
+    if len(df_sched) > 0:  # Iterate thru df_sched to see which (run_id + snapshot_dt) rows fall within the time_from--time_to range.
+        for idx, row in df_sched.iterrows():  # This works even if there are N run_ids for a scheduled time slot, because we iterate through.
+            time_from = row['time_from']
+            time_to = row['time_to']
+            t_from = dt.time(int(time_from[:2]), int(time_from[2:]))
+            t_to = dt.time(int(time_to[:2]), int(time_to[2:]))
+            # For each scheduled task that is supposed to have run, check if log entry exists, indicating successful run #
+            # There will not be repeated alert emails sent, because the monitoring happens immediately after the job which generates the logs, both of which run in the same half hour time window!
+            if t_from <= t_timenow < t_to:
+                # CHECK IF LOG ENTRY ALREADY EXISTS #
+                str_sql = """
+                SELECT * FROM sys_log_datarun
+                WHERE run_id = '{}'
+                AND timestamp >= '{}' AND timestamp < '{}'
+                """.format(row['run_id'], str_date_from, str_date_to)
+                df_log = pd.read_sql(str_sql, conn)
+
+                if len(df_log) < 1:  # There should be at least 1 log entry for the day.
+                    df_out_err = df_out_err.append(row, ignore_index=True)
+                else:
+                    df_out_ok = df_out_ok.append(row, ignore_index=True)
+
+    if len(df_out_err) > 0:  # ie: There are some scheduled data runs without the corresponding entries in the log table. Implies that a data run error has happened.
+        df_out_err = df_out_err[['run_id', 'snapshot_dt', 'time_from', 'time_to']]  # Columns go out of order during append.
+        str_msg = """
+        It appears that one or more of your scheduled data runs has failed!
+        See the list below for details of which scheduled runs have problems.
+        """
+        str_msg2 = """
+        Check tables "sys_cfg_datarun_sched" and "sys_log_datarun_freq", to see why a scheduled data run in the former,
+        is not present in the latter table. Successful data runs should always be logged. 
+        """
+        str_listname = 'test_aa'
+        str_subject = '[{}] Error - Data Run Failed'.format(str_listname)
+        arb = AdminReportBot()
+        arb.send(str_listname=str_listname, str_subject=str_subject, df=df_out_err, str_msg=str_msg, str_msg2=str_msg2)
+
+    # SEND MESSAGE TO INFORM USERS ABOUT SUCCESSFUL RUN #
+    if len(df_out_ok) > 0:
+        str_msg = """
+        Hello! The following scheduled data runs have been completed, and the associated data marts are ready for 
+        use. 
+        """
+
+        if len(df_out_err) > 0:
+            str_msg2 = """
+            
+            """
+        else:
+            pass
+
+        str_listname = 'rm_im_all'
+        str_subject = '[{}] Data Run Completed'.format(str_listname)
+        arb = AdminReportBot()
+        arb.send(str_listname=str_listname, str_subject=str_subject, df=df_out_ok, str_msg=str_msg, str_msg2=str_msg2)
+
+
 def get_datarun_sched(run_id, conn):
     """ Given a run_id key, read config table to get a time range.
     For use in controlling when scheduled jobs are supposed to run.
@@ -107,6 +182,7 @@ def get_datarun_sched(run_id, conn):
         t_to = dt.time(int(time_to[:2]), int(time_to[2:]))
 
         return t_from, t_to
+
 
 def get_dataload_sched(source, dest, file, conn):
     """ Given a source/dest/file key, read config table to get a time range.

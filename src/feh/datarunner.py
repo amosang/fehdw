@@ -1011,6 +1011,46 @@ class OTAIDataRunner(DataRunner):
         str_func_name = 'proc_hotel_price_otb_evolution'
         self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
 
+    @dec_err_handler(retries=0)
+    def proc_hotel_price_only_evolution(self, dt_date=dt.datetime.today()):
+        """ Creates the data mart for the "All Hotel Price Evolution" viz.
+
+        Reads from tables: stg_otai_rates
+        Writes to tables: dm1_hotel_price_only_evolution
+
+        :param dt_date:
+        :return:
+        """
+        run_id = 'proc_hotel_price_only_evolution'
+        str_date_from, str_date_to = feh.utils.split_date(dt_date)
+
+        if self.has_exceeded_datarun_freq(run_id=run_id, str_snapshot_dt=str_date_from):
+            self.logger.info('[{}] SKIPPING. Data already processed for snapshot_dt: {}'.format(run_id, str_date_from))
+        else:
+            str_sql = """
+            SELECT DATE(snapshot_dt) AS snapshot_dt, ArrivalDate AS stay_date, HotelName AS hotel_name, Value AS price FROM stg_otai_rates
+            WHERE ota = 'bookingdotcom'  -- To make it explicit, in case we draw from more OTAs in future.
+            AND snapshot_dt >= '{}' AND snapshot_dt < '{}'
+            """.format(str_date_from, str_date_to)
+
+            df = pd.read_sql(str_sql, self.conn_fehdw)
+
+            # WRITE TO DATABASE #
+            df.to_sql('dm1_hotel_price_only_evolution', self.conn_fehdw, index=False, if_exists='append')
+            self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
+
+            # LOG DATA RUN #
+            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+
+    @dec_err_handler(retries=0)
+    def proc_hotel_price_only_evolution_all(self, str_dt_from=None, str_dt_to=None):
+        """ Iterator method for repeated method calling.
+        """
+        run_id = 'proc_hotel_price_only_evolution_all'
+        l_data_src_tabs = ['stg_otai_rates']
+        str_func_name = 'proc_hotel_price_only_evolution'
+        self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
+
     def run(self, dt_date=dt.datetime.today()):
         # In steady state, no need to supply dt_date; can just use default of today().
         # has_been_loaded() -> dt_date defaults to today()
