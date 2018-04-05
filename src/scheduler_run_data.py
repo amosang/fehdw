@@ -30,6 +30,7 @@ DEBUG = False  # SET BACK TO FALSE AFTER TESTING!
 # proc_op_otb_with_allot
 # proc_op_otb_with_allot_diff
 # proc_hotel_price_otb_evolution
+# proc_hotel_price_only_evolution
 
 # run_id: proc_hotel_price_rank #
 t_from, t_to = feh.utils.get_datarun_sched(run_id='proc_hotel_price_rank', conn=d_run.conn_fehdw)
@@ -53,6 +54,13 @@ if DEBUG | (t_from <= TIME_NOW < t_to):
 t_from, t_to = feh.utils.get_datarun_sched(run_id='proc_hotel_price_otb_evolution', conn=d_run.conn_fehdw)
 if DEBUG | (t_from <= TIME_NOW < t_to):
     otai_drun.proc_hotel_price_otb_evolution(dt_date=dt_date)
+
+# run_id: proc_hotel_price_only_evolution #
+if DEBUG | (t_from <= TIME_NOW < t_to):
+    if otai_drun.has_been_loaded(source='otai', dest='mysql', file='rates'):
+        otai_drun.proc_hotel_price_only_evolution(dt_date=dt_date)
+    else:
+        otai_drun.logger.error('Missing data load for {} data for snapshot_dt: {}.'.format('OTAI Rates', str_date))
 
 
 # RUN TIME: 0930-1000 HRS #
@@ -92,7 +100,6 @@ if DEBUG | (t_from <= TIME_NOW < t_to):
 # Technique: In each half hour time slot, the code above will run data, and must create a log entry if successful.
 # This check uses the presence of a corresponding log entry to determine if a data run is successful.
 # If unsuccessful, an email is sent to the mailing list "fehdw_admin". Comment out below line to disable, if necessary.
-# If successful, an email is sent to the Revenue Manager mailing list, to inform them that the data mart is ready to be used.
-
-#feh.utils.check_datarun_not_logged(TIME_NOW, d_run.conn_fehdw)
+# If successful, an email is sent to the Revenue/Inventory Manager mailing list, to inform them that the data mart is ready to be used.
+feh.utils.check_datarun_not_logged(TIME_NOW, d_run.conn_fehdw)
 

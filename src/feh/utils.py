@@ -155,7 +155,7 @@ def check_datarun_not_logged(t_timenow, conn):
         else:
             pass
 
-        str_listname = 'rm_im_all'
+        str_listname = 'test_aa'  # To switch this back to 'rm_im_all' when LIVE.
         str_subject = '[{}] Data Run Completed'.format(str_listname)
         arb = AdminReportBot()
         arb.send(str_listname=str_listname, str_subject=str_subject, df=df_out_ok, str_msg=str_msg, str_msg2=str_msg2)
