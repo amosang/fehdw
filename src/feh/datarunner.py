@@ -715,6 +715,9 @@ class OccForecastDataRunner(DataRunner):
             df_all.to_sql('dm2_occ_forecast_mkt_diff', self.conn_fehdw, index=False, if_exists='append')
             self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date))
 
+            # LOG DATA RUN #
+            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date)
+
     @dec_err_handler(retries=0)
     def proc_occ_forecast_mkt_diff_all(self, str_dt_from=None, str_dt_to=None):
         """ Iterator method for repeated method calling.

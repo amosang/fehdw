@@ -19,6 +19,55 @@ class MaxDataLoadException(Exception):
     pass
 
 
+def split_date(dt_date=dt.datetime.today(), days=1):
+    """ Convenience function. Given a date, and a number of days, returns 2 formatted strings containing the 2 dates
+    of format 'YYYY-MM-DD'. For use in SQL queries (on the timestamp fields). Note the default values!
+    :param dt_date:
+    :param days:
+    :return: (str_date_from, str_date_to)
+    """
+    str_date_from = dt.datetime.strftime(dt_date, format('%Y-%m-%d'))
+    str_date_to = dt.datetime.strftime(dt_date + dt.timedelta(days=days), format('%Y-%m-%d'))
+    return(str_date_from, str_date_to)
+
+
+def dec_err_handler(retries=0):
+    """
+    Decorator function to handle logging and retries.
+    Usage: Call without the retries parameter to have it log exceptions only, without retrying.
+
+    Assumptions:
+    1) args[0] is "self", and 2) "self.logger" has been instantiated. This means that this decorator will not work with regular functions!
+
+    Ref: https://stackoverflow.com/questions/11731136/python-class-method-decorator-with-self-arguments
+    :retries: Number of times to retry, in addition to original try.
+    """
+    def wrap(f):  # Doing the wrapping here. Called during the decoration of the function.
+        def wrapped_err_handler(*args, **kwargs):  # This way, kwargs can be handled too.
+            logger = args[0].logger  # args[0] is intended to be "self". Assumes that self.logger has already been created on __init__.
+
+            if not isinstance(logger, logging.Logger):  # Ensures that a Logger object is provided.
+                print('[ERROR] Please provide an instance of class: logging.Logger')
+                sys.exit('[ERROR] Please provide an instance of class: logging.Logger')
+
+            for i in range(retries + 1):  # First attempt 0 does not count as a retry.
+                try:
+                    if i > 0:
+                        logger.info(f'[RETRYING] {f.__name__}: {i}/{retries}')  # Print number of retries, BEFORE running f() again.
+                    f(*args, **kwargs)  # PAYLOAD FUNCTION.
+                    break  # So you don't run f() multiple times!
+                except MaxDataLoadException as ex:
+                    logger.error(ex)
+                    break  # Do not retry multiple times, if problem was due to this Exception.
+                except Exception as ex:
+                    logger.error(ex)  # Logging all uncaught exceptions from the called function/method.
+                    time.sleep(2 ** i)  # Exponential backoff. Pause processing for an increasing number of seconds, with each error.
+
+        wrapped_err_handler.__name__ = f.__name__  # Nicety. Rename the error handler function name to that of the wrapped function.
+        return wrapped_err_handler
+    return wrap
+
+
 def check_dataload_not_logged(t_timenow, conn):
     """ This is called from scheduler_load_data.py. Given a Time, check the scheduled data loads table to see
     which jobs are supposed to have run, then look up the data load logs table to look for corresponding entries.
@@ -87,14 +136,13 @@ def check_dataload_not_logged(t_timenow, conn):
 
 
 def check_datarun_not_logged(t_timenow, conn):
-    """ This is called from scheduler_run_data.py. Given a Time, check the scheduled data run table to see
+    """ This is called from scheduler_run_data.py. Given a Time, iterate through the scheduled data run table to see
     which jobs are supposed to have run, then look up the data run logs table to look for corresponding entries.
     If corresponding entries do not exist, this means that the run must have failed.
     :param t_timenow:
     :param conn:
     :return:
     """
-    # Return df of "sched" rows where log entry not found for today.
     df_out_err = DataFrame()
     df_out_ok = DataFrame()
     str_date_from, str_date_to = split_date()  # today's date.
@@ -126,8 +174,9 @@ def check_datarun_not_logged(t_timenow, conn):
                 else:
                     df_out_ok = df_out_ok.append(row, ignore_index=True)
 
+    # SEND MESSAGE TO INFORM ADMINS ABOUT ERRONEOUS RUN #
     if len(df_out_err) > 0:  # ie: There are some scheduled data runs without the corresponding entries in the log table. Implies that a data run error has happened.
-        df_out_err = df_out_err[['run_id', 'snapshot_dt', 'time_from', 'time_to']]  # Columns go out of order during append.
+        df_out_err = df_out_err[['run_id', 'time_from', 'time_to']]  # Columns go out of order during append.
         str_msg = """
         It appears that one or more of your scheduled data runs has failed!
         See the list below for details of which scheduled runs have problems.
@@ -143,17 +192,22 @@ def check_datarun_not_logged(t_timenow, conn):
 
     # SEND MESSAGE TO INFORM USERS ABOUT SUCCESSFUL RUN #
     if len(df_out_ok) > 0:
+        df_out_ok = df_out_ok[['run_id', 'time_from', 'time_to']]
+
         str_msg = """
         Hello! The following scheduled data runs have been completed, and the associated data marts are ready for 
-        use. 
+        use in your visualizations.
         """
-
+        # "str_msg2" will be constructed differently, depending on whether there are errors found.
         if len(df_out_err) > 0:
             str_msg2 = """
-            
-            """
+            Uh-oh! These data runs appear to have errors. The data marts will still load, but you might not get the latest data.
+            I will go notify the admins now! 
+            <br />
+            {}
+            """.format(df_out_err.to_html(index=False, na_rep='', justify='left'))
         else:
-            pass
+            str_msg2 = ''
 
         str_listname = 'test_aa'  # To switch this back to 'rm_im_all' when LIVE.
         str_subject = '[{}] Data Run Completed'.format(str_listname)
@@ -209,52 +263,6 @@ def get_dataload_sched(source, dest, file, conn):
         t_to = dt.time(int(time_to[:2]), int(time_to[2:]))
 
         return t_from, t_to
-
-
-def split_date(dt_date=dt.datetime.today(), days=1):
-    """ Convenience function. Given a date, and a number of days, returns 2 formatted strings containing the 2 dates
-    of format 'YYYY-MM-DD'. For use in SQL queries (on the timestamp fields). Note the default values!
-    :param dt_date:
-    :param days:
-    :return: (str_date_from, str_date_to)
-    """
-    str_date_from = dt.datetime.strftime(dt_date, format('%Y-%m-%d'))
-    str_date_to = dt.datetime.strftime(dt_date + dt.timedelta(days=days), format('%Y-%m-%d'))
-    return(str_date_from, str_date_to)
-
-
-def dec_err_handler(retries=0):
-    """
-    Decorator function to handle logging and retries.
-    Usage: Call without the retries parameter to have it log exceptions only, without retrying.
-    Assumptions: 1) args[0] is "self", and "self.logger" has been instantiated.
-    Ref: https://stackoverflow.com/questions/11731136/python-class-method-decorator-with-self-arguments
-    :retries: Number of times to retry, in addition to original try.
-    """
-    def wrap(f):  # Doing the wrapping here. Called during the decoration of the function.
-        def wrapped_err_handler(*args, **kwargs):  # This way, kwargs can be handled too.
-            logger = args[0].logger  # args[0] is intended to be "self". Assumes that self.logger has already been created on __init__.
-
-            if not isinstance(logger, logging.Logger):  # Ensures that a Logger object is provided.
-                print('[ERROR] Please provide an instance of class: logging.Logger')
-                sys.exit('[ERROR] Please provide an instance of class: logging.Logger')
-
-            for i in range(retries + 1):  # First attempt 0 does not count as a retry.
-                try:
-                    if i > 0:
-                        logger.info(f'[RETRYING] {f.__name__}: {i}/{retries}')  # Print number of retries, BEFORE running f() again.
-                    f(*args, **kwargs)  # PAYLOAD FUNCTION.
-                    break  # So you don't run f() multiple times!
-                except MaxDataLoadException as ex:
-                    logger.error(ex)
-                    break  # Do not retry multiple times, if problem was due to this Exception.
-                except Exception as ex:
-                    logger.error(ex)  # Logging all uncaught exceptions from the called function/method.
-                    time.sleep(2 ** i)  # Exponential backoff. Pause processing for an increasing number of seconds, with each error.
-
-        wrapped_err_handler.__name__ = f.__name__  # Nicety. Rename the error handler function name to that of the wrapped function.
-        return wrapped_err_handler
-    return wrap
 
 
 def get_latest_file(str_folder=None, pattern=None):
