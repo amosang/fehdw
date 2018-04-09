@@ -290,6 +290,77 @@ class DataRunner(object):
         otai_dr.remove_log_datarun(run_id='proc_hotel_price_rank', str_snapshot_dt=None)
         otai_dr.proc_hotel_price_rank_all()
 
+    @dec_err_handler(retries=0)
+    def archive_data_marts(self, dt_date=dt.datetime.today()):
+        """ Move records from specified data mart tables to their corresponding archive tables ("arc_*").
+        Records to be moved are dependent on snapshot_dt, and on the lookback periods specified in the table: sys_cfg_dm_archive_lookback.
+
+        Notes:
+        1)The idea behind archiving the records, is so that the users download less records, from the viz layer, which are pointing to fixed tables.
+        2) Multiple runs of this method should not matter, because nothing will happen as the rows have already been
+        moved over to their respective archive tables already.
+        3) The effects of this method are cumulative, ie: even if it has not been run on 1 day, running it at a later
+        date will still be okay.
+        4) The technique used here is not transaction safe, as MyISAM DB engine does not support transactions.
+        However, we do not expect to have issues, given that the manipulations happen in seconds, and purely at the DB layer only.
+        We also have the ability to rebuild the data marts from scratch, using only the staging tables.
+        https://stackoverflow.com/questions/8036005/myisam-engine-transaction-support.
+        :return: NA
+        """
+        run_id = 'archive_data_marts'
+        str_date_from, str_date_to = split_date(dt_date)
+
+        if self.has_exceeded_datarun_freq(run_id=run_id, str_snapshot_dt=str_date_from):
+            self.logger.info('[{}] SKIPPING. Archival of data marts is already done for snapshot_dt: {}'.format(run_id, str_date_from))
+        else:
+            # Get "lookback" table. This gives the list of tables which are supposed to be archived #
+            # Notice that dm1* tables will be processed before dm2* tables, given the ORDER BY clause.
+            str_sql_lookback = """
+            SELECT * FROM sys_cfg_dm_archive_lookback ORDER BY table_name
+            """
+            df_lookback = pd.read_sql(str_sql_lookback, self.conn_fehdw)
+
+            # ITERATE THROUGH EACH ROW/TABLE, AND ARCHIVE IT #
+            for idx, row in df_lookback.iterrows():
+                # Extracting variables for ease of use.
+                str_tab = row['table_name']
+                str_tab_arc = 'arc_' + str_tab  # Adding "arc_" prefix to each table.
+                i_days = row['lookback_days']
+
+                # Cut-off date is based on latest snapshot_dt in the source table, instead of current date. This is in case there are no records for current date. Then we will always still have the prescribed number of lookback snapshot_dts.
+                str_sql = f'SELECT MAX(snapshot_dt) AS snapshot_dt_max FROM {str_tab}'
+                df = pd.read_sql(str_sql, self.conn_fehdw)
+                dt_cutoff = df['snapshot_dt_max'][0] - dt.timedelta(days=i_days)  # Any snapshot_dt LESS THAN dt_cutoff will be archived.
+                str_dt_cutoff = dt.datetime.strftime(dt_cutoff, format='%Y-%m-%d')
+
+                # MOVE THE ROWS FROM SOURCE TABLE TO CORRESPONDING ARCHIVE TABLE #
+                # Create archive table, if it does not already exist.
+                str_sql = f"""
+                CREATE TABLE IF NOT EXISTS {str_tab_arc} LIKE {str_tab};
+                """
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
+
+                # Copy to archive table
+                str_sql = f"""
+                INSERT INTO {str_tab_arc} 
+                SELECT * FROM {str_tab} 
+                WHERE snapshot_dt < '{str_dt_cutoff}';
+                """
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
+
+                # Delete from source table
+                str_sql = f"""
+                DELETE FROM {str_tab}
+                WHERE snapshot_dt < '{str_dt_cutoff}';
+                """
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
+
+                # WRITE TO LOG FILE #
+                self.logger.info('Archived table: {} on snapshot_dt: {}. Used cutoff date {}'.format(str_tab, str_date_from, str_dt_cutoff))  # Do detailed logging in the log file only.
+
+            # LOG DATA RUN #
+            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+
 
 class OperaOTBDataRunner(DataRunner):
     """ For generating the Opera OTB with allocation (from CAG file).

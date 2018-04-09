@@ -139,9 +139,11 @@ def check_datarun_not_logged(t_timenow, conn):
     """ This is called from scheduler_run_data.py. Given a Time, iterate through the scheduled data run table to see
     which jobs are supposed to have run, then look up the data run logs table to look for corresponding entries.
     If corresponding entries do not exist, this means that the run must have failed.
+
+    TODO: Note that logging does not happen for any of the functions in feh.utils (because cannot use decorator func as there is no "logger"). Might wish to refactor some methods into the DataRun class instead?
     :param t_timenow:
     :param conn:
-    :return:
+    :return: NA
     """
     df_out_err = DataFrame()
     df_out_ok = DataFrame()
@@ -174,6 +176,11 @@ def check_datarun_not_logged(t_timenow, conn):
                 else:
                     df_out_ok = df_out_ok.append(row, ignore_index=True)
 
+    # Users don't want to know about it if archival of data marts works. Hence we remove run_id='archive_data_marts'
+    # from df_out_ok, but not from df_out_err (because the admins will want to know if there's an error).
+    if len(df_out_ok) > 0:
+        df_out_ok = df_out_ok[~df_out_ok['run_id'].isin(['archive_data_marts'])]
+
     # SEND MESSAGE TO INFORM ADMINS ABOUT ERRONEOUS RUN #
     if len(df_out_err) > 0:  # ie: There are some scheduled data runs without the corresponding entries in the log table. Implies that a data run error has happened.
         df_out_err = df_out_err[['run_id', 'time_from', 'time_to']]  # Columns go out of order during append.
@@ -185,7 +192,7 @@ def check_datarun_not_logged(t_timenow, conn):
         Check tables "sys_cfg_datarun_sched" and "sys_log_datarun_freq", to see why a scheduled data run in the former,
         is not present in the latter table. Successful data runs should always be logged. 
         """
-        str_listname = 'test_aa'
+        str_listname = 'fehdw_admin'
         str_subject = '[{}] Error - Data Run Failed'.format(str_listname)
         arb = AdminReportBot()
         arb.send(str_listname=str_listname, str_subject=str_subject, df=df_out_err, str_msg=str_msg, str_msg2=str_msg2)
@@ -197,7 +204,8 @@ def check_datarun_not_logged(t_timenow, conn):
         str_msg = """
         Hello! The following scheduled data runs have been completed, and the associated data marts are ready for 
         use in your visualizations.
-        """
+        """  # In the outgoing email, "df_out_ok" will appear immediately below this message.
+
         # "str_msg2" will be constructed differently, depending on whether there are errors found.
         if len(df_out_err) > 0:
             str_msg2 = """
@@ -209,7 +217,7 @@ def check_datarun_not_logged(t_timenow, conn):
         else:
             str_msg2 = ''
 
-        str_listname = 'test_aa'  # To switch this back to 'rm_im_all' when LIVE.
+        str_listname = 'fehdw_admin'  # To switch this back to 'rm_im_all' when LIVE.
         str_subject = '[{}] Data Run Completed'.format(str_listname)
         arb = AdminReportBot()
         arb.send(str_listname=str_listname, str_subject=str_subject, df=df_out_ok, str_msg=str_msg, str_msg2=str_msg2)

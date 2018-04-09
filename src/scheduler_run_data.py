@@ -95,6 +95,10 @@ t_from, t_to = feh.utils.get_datarun_sched(run_id='proc_target_adr_with_otb_pric
 if DEBUG | (t_from <= TIME_NOW < t_to):
     op_drun.proc_target_adr_with_otb_price_fc(dt_date=dt_date)
 
+# run_id: archive_data_marts #
+t_from, t_to = feh.utils.get_datarun_sched(run_id='archive_data_marts', conn=d_run.conn_fehdw)
+if DEBUG | (t_from <= TIME_NOW < t_to):
+    d_run.archive_data_marts(dt_date=dt_date)
 
 # CHECK IF DATA RUN HAS COMPLETED SUCCESSFULLY #
 # Technique: In each half hour time slot, the code above will run data, and must create a log entry if successful.
