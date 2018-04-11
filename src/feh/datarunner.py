@@ -224,13 +224,18 @@ class DataRunner(object):
 
         pd.io.sql.execute(str_sql, self.conn_fehdw)
 
-    def drop_and_reload_data_marts(self):
+    def drop_and_reload_data_marts(self, dt_date=None):
         """ Drops all data marts specified here; reloads them in correct order.
         Due to dependencies, dm1* tables must be re-created before dm2* types.
         Assumption is that the stg* tables are already up-to-date.
 
         For greater control over the process, something which is dropped will be reloaded soonest possible, instead of dropping all tables at once.
         Each logical group of tables will be treated as a set, and dropped as a set.
+
+        IMPORTANT: If new data marts (ie: tables) are added, remember to extend the processing logic found here to include these new data marts!
+
+        :param dt_date:
+        :return:
         """
         # Create only 1 instance of each class, to avoid having 2 simultaneous instances of the same class, as this causes
         # file logger issues (2nd instance unable to get a lock on the log file and hence cannot write to it).
@@ -238,57 +243,173 @@ class DataRunner(object):
         op_dr = OperaOTBDataRunner()
         otai_dr = OTAIDataRunner()
 
-        # EzRMS and Market Occ Forecast #
-        self.logger.info('DELETING DATA MART: {}'.format('dm1_occ_forecasts_ezrms_mkt'))
-        str_sql = """
-        DROP TABLE IF EXISTS dm1_occ_forecasts_ezrms_mkt;
-        """
-        pd.io.sql.execute(str_sql, self.conn_fehdw)
-        of_dr.remove_log_datarun(run_id='proc_occ_forecasts', str_snapshot_dt=None)
-        of_dr.proc_occ_forecasts_all()
+        if dt_date is None:
+            # EzRMS and Market Occ Forecast #
+            self.logger.info('DELETING DATA MART: {}'.format('dm1_occ_forecasts_ezrms_mkt'))
+            str_sql = """
+            DROP TABLE IF EXISTS dm1_occ_forecasts_ezrms_mkt;
+            """
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            of_dr.remove_log_datarun(run_id='proc_occ_forecasts', str_snapshot_dt=None)
+            of_dr.proc_occ_forecasts_all()
 
-        # Market Occ Forecast #  => Note the dependency on dm1_occ_forecasts_ezrms_mkt!
-        self.logger.info('DELETING DATA MART: {}'.format('dm2_occ_forecast_mkt_diff'))
-        str_sql = """
-        DROP TABLE IF EXISTS dm2_occ_forecast_mkt_diff;
-        """
-        pd.io.sql.execute(str_sql, self.conn_fehdw)
-        of_dr.remove_log_datarun(run_id='proc_occ_forecast_mkt_diff', str_snapshot_dt=None)
-        of_dr.proc_occ_forecast_mkt_diff_all()
+            # Market Occ Forecast #  => Note the dependency on dm1_occ_forecasts_ezrms_mkt!
+            self.logger.info('DELETING DATA MART: {}'.format('dm2_occ_forecast_mkt_diff'))
+            str_sql = """
+            DROP TABLE IF EXISTS dm2_occ_forecast_mkt_diff;
+            """
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            of_dr.remove_log_datarun(run_id='proc_occ_forecast_mkt_diff', str_snapshot_dt=None)
+            of_dr.proc_occ_forecast_mkt_diff_all()
 
+            # EzRMS Occ Forecast Changes #
+            self.logger.info('DELETING DATA MART: {}'.format('dm1_occ_forecast_ezrms, dm2_occ_forecast_ezrms_diff'))
+            str_sql = """
+            DROP TABLE IF EXISTS dm1_occ_forecast_ezrms, dm2_occ_forecast_ezrms_diff;
+            """
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            of_dr.remove_log_datarun(run_id='proc_occ_forecast_ezrms', str_snapshot_dt=None)
+            of_dr.remove_log_datarun(run_id='proc_occ_forecast_ezrms_diff', str_snapshot_dt=None)
+            of_dr.proc_occ_forecast_ezrms_all()
+            of_dr.proc_occ_forecast_ezrms_diff_all()
 
-        # EzRMS Occ Forecast Changes #
-        self.logger.info('DELETING DATA MART: {}'.format('dm1_occ_forecast_ezrms, dm2_occ_forecast_ezrms_diff'))
-        str_sql = """
-        DROP TABLE IF EXISTS dm1_occ_forecast_ezrms, dm2_occ_forecast_ezrms_diff;
-        """
-        pd.io.sql.execute(str_sql, self.conn_fehdw)
-        of_dr.remove_log_datarun(run_id='proc_occ_forecast_ezrms', str_snapshot_dt=None)
-        of_dr.remove_log_datarun(run_id='proc_occ_forecast_ezrms_diff', str_snapshot_dt=None)
-        of_dr.proc_occ_forecast_ezrms_all()
-        of_dr.proc_occ_forecast_ezrms_diff_all()
+            # Opera Pickup #
+            self.logger.info('DELETING DATA MART: {}'.format('dm1_op_otb_with_allot, dm2_op_otb_with_allot_diff'))
+            str_sql = """
+            DROP TABLE IF EXISTS dm1_op_otb_with_allot, dm2_op_otb_with_allot_diff;
+            """
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            op_dr.remove_log_datarun(run_id='proc_op_otb_with_allot', str_snapshot_dt=None)
+            op_dr.remove_log_datarun(run_id='proc_op_otb_with_allot_diff', str_snapshot_dt=None)
+            op_dr.proc_op_otb_with_allot_all()
+            op_dr.proc_op_otb_with_allot_diff_all()
 
+            # Hotel Price Rank #
+            self.logger.info('DELETING DATA MART: {}'.format('dm1_hotel_price_rank'))
+            str_sql = """
+            DROP TABLE IF EXISTS dm1_hotel_price_rank;
+            """
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            otai_dr.remove_log_datarun(run_id='proc_hotel_price_rank', str_snapshot_dt=None)
+            otai_dr.proc_hotel_price_rank_all()
 
-        # Opera Pickup #
-        self.logger.info('DELETING DATA MART: {}'.format('dm1_op_otb_with_allot, dm2_op_otb_with_allot_diff'))
-        str_sql = """
-        DROP TABLE IF EXISTS dm1_op_otb_with_allot, dm2_op_otb_with_allot_diff;
-        """
-        pd.io.sql.execute(str_sql, self.conn_fehdw)
-        op_dr.remove_log_datarun(run_id='proc_op_otb_with_allot', str_snapshot_dt=None)
-        op_dr.remove_log_datarun(run_id='proc_op_otb_with_allot_diff', str_snapshot_dt=None)
-        op_dr.proc_op_otb_with_allot_all()
-        op_dr.proc_op_otb_with_allot_diff_all()
+            # Hotel Price Only Evolution #
+            self.logger.info('DELETING DATA MART: {}'.format('dm1_hotel_price_only_evolution'))
+            str_sql = """
+            DROP TABLE IF EXISTS dm1_hotel_price_only_evolution;
+            """
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            otai_dr.remove_log_datarun(run_id='proc_hotel_price_only_evolution', str_snapshot_dt=None)
+            otai_dr.proc_hotel_price_only_evolution_all()
 
+            # Hotel Price & OTB Evolution #
+            self.logger.info('DELETING DATA MART: {}'.format('dm2_hotel_price_otb_evolution'))
+            str_sql = """
+            DROP TABLE IF EXISTS dm2_hotel_price_otb_evolution;
+            """
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            otai_dr.remove_log_datarun(run_id='proc_hotel_price_otb_evolution', str_snapshot_dt=None)
+            otai_dr.proc_hotel_price_otb_evolution_all()
 
-        # Hotel Price Rank #
-        self.logger.info('DELETING DATA MART: {}'.format('dm1_hotel_price_rank'))
-        str_sql = """
-        DROP TABLE IF EXISTS dm1_hotel_price_rank;
-        """
-        pd.io.sql.execute(str_sql, self.conn_fehdw)
-        otai_dr.remove_log_datarun(run_id='proc_hotel_price_rank', str_snapshot_dt=None)
-        otai_dr.proc_hotel_price_rank_all()
+            # Target ADR #
+            self.logger.info('DELETING DATA MART: {}'.format('dm2_adr_occ_fc_price'))
+            str_sql = """
+            DROP TABLE IF EXISTS dm2_adr_occ_fc_price;
+            """
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            op_dr.remove_log_datarun(run_id='proc_target_adr_with_otb_price_fc', str_snapshot_dt=None)
+            op_dr.proc_target_adr_with_otb_price_fc_all()
+        else:
+            # PROCESS drop_and_reload FOR ONLY THE SPECIFIED DATE #
+            str_date = dt.datetime.strftime(dt_date, '%Y-%m-%d')
+
+            # EzRMS and Market Occ Forecast #
+            self.logger.info('DELETING DATA MART: {} for snapshot_dt: {}'.format('dm1_occ_forecasts_ezrms_mkt', str_date))
+            str_sql = """
+            DELETE FROM dm1_occ_forecasts_ezrms_mkt WHERE snapshot_dt = '{}'
+            """.format(str_date)
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            of_dr.remove_log_datarun(run_id='proc_occ_forecasts', str_snapshot_dt=str_date)
+            of_dr.proc_occ_forecasts_all(str_dt_from=str_date, str_dt_to=str_date)
+
+            # Market Occ Forecast #  => Note the dependency on dm1_occ_forecasts_ezrms_mkt!
+            self.logger.info('DELETING DATA MART: {} for snapshot_dt: {}'.format('dm2_occ_forecast_mkt_diff', str_date))
+            str_sql = """
+            DELETE FROM dm2_occ_forecast_mkt_diff WHERE snapshot_dt = '{}'
+            """.format(str_date)
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            of_dr.remove_log_datarun(run_id='proc_occ_forecast_mkt_diff', str_snapshot_dt=str_date)
+            of_dr.proc_occ_forecast_mkt_diff_all(str_dt_from=str_date, str_dt_to=str_date)
+
+            # EzRMS Occ Forecast Changes #
+            self.logger.info('DELETING DATA MART: {} for snapshot_dt: {}'.format('dm1_occ_forecast_ezrms, dm2_occ_forecast_ezrms_diff', str_date))
+            str_sql = """
+            DELETE FROM dm1_occ_forecast_ezrms WHERE snapshot_dt = '{}'
+            """.format(str_date)
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+
+            str_sql = """
+            DELETE FROM dm2_occ_forecast_ezrms_diff WHERE snapshot_dt = '{}'
+            """.format(str_date)
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+
+            of_dr.remove_log_datarun(run_id='proc_occ_forecast_ezrms', str_snapshot_dt=str_date)
+            of_dr.remove_log_datarun(run_id='proc_occ_forecast_ezrms_diff', str_snapshot_dt=str_date)
+            of_dr.proc_occ_forecast_ezrms_all(str_dt_from=str_date, str_dt_to=str_date)
+            of_dr.proc_occ_forecast_ezrms_diff_all(str_dt_from=str_date, str_dt_to=str_date)
+
+            # Opera Pickup #
+            self.logger.info('DELETING DATA MART: {} for snapshot_dt: {}'.format('dm1_op_otb_with_allot, dm2_op_otb_with_allot_diff', str_date))
+            str_sql = """
+            DELETE FROM dm1_op_otb_with_allot WHERE snapshot_dt = '{}'            
+            """.format(str_date)
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+
+            str_sql = """
+            DELETE FROM dm2_op_otb_with_allot_diff WHERE snapshot_dt = '{}'            
+            """.format(str_date)
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+
+            op_dr.remove_log_datarun(run_id='proc_op_otb_with_allot', str_snapshot_dt=str_date)
+            op_dr.remove_log_datarun(run_id='proc_op_otb_with_allot_diff', str_snapshot_dt=str_date)
+            op_dr.proc_op_otb_with_allot_all(str_dt_from=str_date, str_dt_to=str_date)
+            op_dr.proc_op_otb_with_allot_diff_all(str_dt_from=str_date, str_dt_to=str_date)
+
+            # Hotel Price Rank #
+            self.logger.info('DELETING DATA MART: {} for snapshot_dt: {}'.format('dm1_hotel_price_rank', str_date))
+            str_sql = """
+            DELETE FROM dm1_hotel_price_rank WHERE snapshot_dt = '{}'
+            """.format(str_date)
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            otai_dr.remove_log_datarun(run_id='proc_hotel_price_rank', str_snapshot_dt=str_date)
+            otai_dr.proc_hotel_price_rank_all(str_dt_from=str_date, str_dt_to=str_date)
+
+            # Hotel Price Only Evolution #
+            self.logger.info('DELETING DATA MART: {} for snapshot_dt: {}'.format('dm1_hotel_price_only_evolution', str_date))
+            str_sql = """
+            DELETE FROM dm1_hotel_price_only_evolution WHERE snapshot_dt = '{}'
+            """.format(str_date)
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            otai_dr.remove_log_datarun(run_id='proc_hotel_price_only_evolution', str_snapshot_dt=str_date)
+            otai_dr.proc_hotel_price_only_evolution_all(str_dt_from=str_date, str_dt_to=str_date)
+
+            # Hotel Price & OTB Evolution #
+            self.logger.info('DELETING DATA MART: {} for snapshot_dt: {}'.format('dm2_hotel_price_otb_evolution', str_date))
+            str_sql = """
+            DELETE FROM dm2_hotel_price_otb_evolution WHERE snapshot_dt = '{}'
+            """.format(str_date)
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            otai_dr.remove_log_datarun(run_id='proc_hotel_price_otb_evolution', str_snapshot_dt=str_date)
+            otai_dr.proc_hotel_price_otb_evolution_all(str_dt_from=str_date, str_dt_to=str_date)
+
+            # Target ADR #
+            self.logger.info('DELETING DATA MART: {} for snapshot_dt: {}'.format('dm2_adr_occ_fc_price', str_date))
+            str_sql = """
+            DELETE FROM dm2_adr_occ_fc_price WHERE snapshot_dt = '{}'
+            """.format(str_date)
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            op_dr.remove_log_datarun(run_id='proc_target_adr_with_otb_price_fc', str_snapshot_dt=str_date)
+            op_dr.proc_target_adr_with_otb_price_fc_all(str_dt_from=str_date, str_dt_to=str_date)
 
     @dec_err_handler(retries=0)
     def archive_data_marts(self, dt_date=dt.datetime.today()):

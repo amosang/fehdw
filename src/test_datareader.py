@@ -6,11 +6,11 @@ from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataR
 from feh.utils import *
 
 
-TEST_CASE = 'fix_dataload_ezrms'     ### TEST CASE!
+TEST_CASE = 'check_dataload_not_logged'     ### TEST CASE!
 
-if TEST_CASE == 'fix_dataload_ezrms':
-    ezrms_dr = EzrmsDataReader()
-    ezrms_dr.load()
+if TEST_CASE == 'check_dataload_not_logged':
+    dr = DataReader()
+    check_dataload_not_logged(dt.time(0, 0), dr.db_conn)
 
 
 if TEST_CASE == 'test_load_rates':

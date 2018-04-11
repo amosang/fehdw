@@ -78,7 +78,7 @@ def check_dataload_not_logged(t_timenow, conn):
     """
     # Return df of "sched" rows where log entry not found for today.
     df_out = DataFrame()
-    str_date_from, str_date_to = split_date()
+    str_date_from, str_date_to = split_date()  # today's date.
 
     str_sql = """
     SELECT * FROM sys_cfg_dataload_sched
@@ -119,6 +119,13 @@ def check_dataload_not_logged(t_timenow, conn):
                     # Alternatively, in scheduler_load_data.py, call each of the 3 Opera files one-by-one directly thru load_otb().
                     df_out = df_out.append(row, ignore_index=True)
 
+    # # DEBUG. Uncomment this to simulate error for "ezrms" #
+    # str_sql = """
+    # SELECT * FROM sys_cfg_dataload_sched WHERE source = 'ezrms'
+    # """
+    # df_out = pd.read_sql(str_sql, conn)
+    # # ENDDEBUG #
+
     if len(df_out) > 0:
         # There are some scheduled data loads without the corresponding entries in the log table. Implying a data load error has happened.
         df_out = df_out[['source', 'dest', 'file', 'time_from', 'time_to']]  # Columns go out of order during append.
@@ -133,6 +140,53 @@ def check_dataload_not_logged(t_timenow, conn):
         str_subject = '[fehdw_admin] Error - Data Loading Failed'
         arb = AdminReportBot()
         arb.send(str_listname='fehdw_admin', str_subject=str_subject, df=df_out, str_msg=str_msg, str_msg2=str_msg2)
+
+        # TODO: For some reason, not able to send 2 emails quickly back-to-back. Sleeping does not help either.
+        # Will get below error. This is somewhat mitigated, because receiving either email let's the admins know something has happened.
+        # "ERROR:admin_report_bot:[WinError 10060] A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond"
+
+        # If data load fails and the source is EzRMS/Opera/FWK, copy the last successful data load but with a new snapshot_dt #
+        for idx, row in df_out.iterrows():
+            str_subject = '[fehdw_admin] Data Imputation has happened for: {}'.format(row['source'])
+
+            # EzRMS Forecast #
+            if (row['source'] == 'ezrms') & (row['dest'] == 'mysql') & (row['file'] == 'forecast'):
+                l_tab_name = ['stg_ezrms_forecast']
+                copy_last_snapshot_dt_dataset(l_tab_name=l_tab_name, row=row)
+
+                str_msg = """                
+                Data imputation has happened for the following tables: <br>                
+                {} <br><br>
+                Recall that data imputation will only happen when data loading fails for EzRMS/Opera/FWK data sources.
+                Check the datareader "global.log" file for more details.
+                """.format(str(l_tab_name))
+                arb.send(str_listname='fehdw_admin', str_subject=str_subject, df=None, str_msg=str_msg, str_msg2='')
+
+            # Opera #
+            if (row['source'] == 'opera') & (row['dest'] == 'mysql') & (row['file'] == '*'):
+                l_tab_name = ['stg_op_act_nonrev', 'stg_op_act_rev', 'stg_op_cag', 'stg_op_otb_nonrev', 'stg_op_otb_rev']
+                copy_last_snapshot_dt_dataset(l_tab_name=l_tab_name, row=row)
+
+                str_msg = """                
+                Data imputation has happened for the following tables: <br>                
+                {} <br><br>
+                Recall that data imputation will only happen when data loading fails for EzRMS/Opera/FWK data sources.
+                Check the datareader "global.log" file for more details.
+                """.format(str(l_tab_name))
+                arb.send(str_listname='fehdw_admin', str_subject=str_subject, df=None, str_msg=str_msg, str_msg2='')
+
+            # FWK #
+            if (row['source'] == 'fwk') & (row['dest'] == 'mysql') & (row['file'] == '*'):
+                l_tab_name = ['stg_fwk_proj', 'stg_fwk_otb']
+                copy_last_snapshot_dt_dataset(l_tab_name=l_tab_name, row=row)
+
+                str_msg = """                
+                Data imputation has happened for the following tables: <br>                
+                {} <br><br>
+                Recall that data imputation will only happen when data loading fails for EzRMS/Opera/FWK data sources.
+                Check the datareader "global.log" file for more details.
+                """.format(str(l_tab_name))
+                arb.send(str_listname='fehdw_admin', str_subject=str_subject, df=None, str_msg=str_msg, str_msg2='')
 
 
 def check_datarun_not_logged(t_timenow, conn):
@@ -415,3 +469,39 @@ def get_db_table_info(conn=None, schema='fehdw', filename=sys.stdout):
         print('\n', file=fh)
 
 
+def copy_last_snapshot_dt_dataset(l_tab_name, row):
+    """ Given a list of table names, for each table, take the MAX(snapshot_dt). Select the data subset from that table
+    based on snapshot_dt_max. Then override snapshot_dt with today(). Lastly, insert this data set back into the same table.
+
+    Note: Logging will be only to global.log, and not to any of the sub-logs, because we wouldn't know which sub-log to use.
+    :param l_tab_name: List of table names to process.
+    :return: NA
+    """
+    import feh.datareader  # careful to avoid circular imports!
+
+    dr = feh.datareader.DataReader()
+    dr._init_logger(logger_name='global')  # Global log only.
+
+    for str_tab_name in l_tab_name:
+        # Get the snapshot_dt of the last successful load.
+        str_sql = """
+        SELECT DATE(MAX(snapshot_dt)) AS snapshot_dt_max FROM {}
+        """.format(str_tab_name)
+        df = pd.read_sql(str_sql, dr.db_conn)
+
+        dt_max = df['snapshot_dt_max'][0]
+        str_date_from, str_date_to = split_date(dt_max)
+
+        str_sql = """
+        SELECT * FROM {} 
+        WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}'
+        """.format(str_tab_name, str_date_from, str_date_to)
+        df_tab = pd.read_sql(str_sql, dr.db_conn)
+        df_tab['snapshot_dt'] = dt.datetime.today()  # Take data set as is, but replace snapshot_dt with current time.
+
+        # WRITE TO DATABASE #
+        df_tab.to_sql(str_tab_name, dr.db_conn, index=False, if_exists='append')
+
+        # LOG DATALOAD #
+        dr.logger.info('Imputed data set for table: {} using latest snapshot_dt: {}'.format(str_tab_name, str_date_from))
+        dr.log_dataload(row['source'], row['dest'], row['file'])
