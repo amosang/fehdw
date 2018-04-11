@@ -475,6 +475,7 @@ def copy_last_snapshot_dt_dataset(l_tab_name, row):
 
     Note: Logging will be only to global.log, and not to any of the sub-logs, because we wouldn't know which sub-log to use.
     :param l_tab_name: List of table names to process.
+    :param row: Series data type. Contains source/dest/file. For logging to the log table.
     :return: NA
     """
     import feh.datareader  # careful to avoid circular imports!
