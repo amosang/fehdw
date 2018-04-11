@@ -313,6 +313,8 @@ class DataRunner(object):
         if self.has_exceeded_datarun_freq(run_id=run_id, str_snapshot_dt=str_date_from):
             self.logger.info('[{}] SKIPPING. Archival of data marts is already done for snapshot_dt: {}'.format(run_id, str_date_from))
         else:
+            self.logger.info('STARTING DATA MARTS ARCHIVAL')
+
             # Get "lookback" table. This gives the list of tables which are supposed to be archived #
             # Notice that dm1* tables will be processed before dm2* tables, given the ORDER BY clause.
             str_sql_lookback = """
@@ -356,7 +358,7 @@ class DataRunner(object):
                 pd.io.sql.execute(str_sql, self.conn_fehdw)
 
                 # WRITE TO LOG FILE #
-                self.logger.info('Archived table: {} on snapshot_dt: {}. Used cutoff date {}'.format(str_tab, str_date_from, str_dt_cutoff))  # Do detailed logging in the log file only.
+                self.logger.info('[{}] Archived table: {} on snapshot_dt: {}. Used cutoff date {}'.format(run_id, str_tab, str_date_from, str_dt_cutoff))  # Do detailed logging in the log file only.
 
             # LOG DATA RUN #
             self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)

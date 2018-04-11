@@ -206,8 +206,12 @@ def check_datarun_not_logged(t_timenow, conn):
         use in your visualizations.
         """  # In the outgoing email, "df_out_ok" will appear immediately below this message.
 
+        str_subject = '[{}] Data run completed'.format(str_listname)
+
         # "str_msg2" will be constructed differently, depending on whether there are errors found.
         if len(df_out_err) > 0:
+            str_subject = '[{}] Data run completed with errors'.format(str_listname)
+
             str_msg2 = """
             Uh-oh! These data runs appear to have errors. The data marts will still load, but you might not get the latest data.
             I will go notify the admins now! 
@@ -218,7 +222,7 @@ def check_datarun_not_logged(t_timenow, conn):
             str_msg2 = ''
 
         str_listname = 'fehdw_admin'  # To switch this back to 'rm_im_all' when LIVE.
-        str_subject = '[{}] Data Run Completed'.format(str_listname)
+
         arb = AdminReportBot()
         arb.send(str_listname=str_listname, str_subject=str_subject, df=df_out_ok, str_msg=str_msg, str_msg2=str_msg2)
 

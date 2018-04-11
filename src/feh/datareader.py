@@ -641,7 +641,8 @@ class EzrmsDataReader(DataReader):
             raise MaxDataLoadException(str_err)
 
         self.logger.info('Initiating Chrome webdriver and logging in to EzRMS')
-        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], 'chromedriver_2.34.exe')
+        # Path to chromedriver executable. Get latest versions from https://sites.google.com/a/chromium.org/chromedriver/downloads
+        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], 'chromedriver_2.37.exe')
         driver = webdriver.Chrome(executable_path=str_fn_chromedriver)  # NOTE: Check for presence of 'options!'.
         driver.get('https://bw8.ezrms.infor.com/ezmingle.isp')
         driver.switch_to.frame('Infor Generic Application')

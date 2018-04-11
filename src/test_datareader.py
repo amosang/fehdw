@@ -6,7 +6,12 @@ from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataR
 from feh.utils import *
 
 
-TEST_CASE = 'test_123'     ### TEST CASE!
+TEST_CASE = 'fix_dataload_ezrms'     ### TEST CASE!
+
+if TEST_CASE == 'fix_dataload_ezrms':
+    ezrms_dr = EzrmsDataReader()
+    ezrms_dr.load()
+
 
 if TEST_CASE == 'test_load_rates':
     otai_dr = OTAIDataReader()
