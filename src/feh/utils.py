@@ -196,7 +196,7 @@ def check_datarun_not_logged(t_timenow, conn):
 
     TODO: Note that logging does not happen for any of the functions in feh.utils (because cannot use decorator func as there is no "logger"). Might wish to refactor some methods into the DataRun class instead?
     :param t_timenow:
-    :param conn:
+    :param conn: Connection object to 'fehdw' database.
     :return: NA
     """
     df_out_err = DataFrame()
@@ -235,6 +235,7 @@ def check_datarun_not_logged(t_timenow, conn):
     if len(df_out_ok) > 0:
         df_out_ok = df_out_ok[~df_out_ok['run_id'].isin(['archive_data_marts'])]
 
+
     # SEND MESSAGE TO INFORM ADMINS ABOUT ERRONEOUS RUN #
     if len(df_out_err) > 0:  # ie: There are some scheduled data runs without the corresponding entries in the log table. Implies that a data run error has happened.
         df_out_err = df_out_err[['run_id', 'time_from', 'time_to']]  # Columns go out of order during append.
@@ -252,34 +253,34 @@ def check_datarun_not_logged(t_timenow, conn):
         arb.send(str_listname=str_listname, str_subject=str_subject, df=df_out_err, str_msg=str_msg, str_msg2=str_msg2)
 
     # SEND MESSAGE TO INFORM USERS ABOUT SUCCESSFUL RUN #
-    str_listname_rm_im_all = 'fehdw_admin'  # To switch this back to 'rm_im_all' when LIVE.
+    if len(df_out_ok) > 0:  # This len check is important! It prevents an email from being sent out if no scheduled datarun was run!
+        str_listname_rm_im_all = 'fehdw_admin'  # To switch this back to 'rm_im_all' when LIVE.
 
-    if len(df_out_ok) > 0:
         df_out_ok = df_out_ok[['run_id', 'time_from', 'time_to']]  # Show users only some relevant columns.
 
-    str_msg = """
-    Hello! The following scheduled data runs have been completed, and the associated data marts are ready for 
-    use in your visualizations.
-    """  # In the outgoing email, "df_out_ok" will appear immediately below this message.
+        str_msg = """
+        Hello! The following scheduled data runs have been completed, and the associated data marts are ready for 
+        use in your visualizations.
+        """  # In the outgoing email, "df_out_ok" will appear immediately below this message.
 
-    str_subject = '[{}] Data run completed'.format(str_listname_rm_im_all)
+        str_subject = '[{}] Data run completed'.format(str_listname_rm_im_all)
 
-    # "str_msg2" will be constructed differently, depending on whether there are errors found (ie: df_out_err has rows).
-    if len(df_out_err) > 0:
-        str_subject = '[{}] Data run completed with errors'.format(str_listname_rm_im_all)
+        # "str_msg2" variable will be constructed differently, depending on whether there are errors found (ie: df_out_err has rows).
+        if len(df_out_err) > 0:
+            str_subject = '[{}] Data run completed with errors'.format(str_listname_rm_im_all)
 
-        str_msg2 = """
-        Uh-oh! These data runs appear to have errors. The data marts will still load, but you might not get the latest data.
-        I will go notify the admins now! 
-        <br />
-        {}
-        """.format(df_out_err.to_html(index=False, na_rep='', justify='left'))
-    else:
-        str_msg2 = ''
+            str_msg2 = """
+            Uh-oh! These data runs appear to have errors. The data marts will still load, but you might not get the latest data.
+            I will go notify the admins now! 
+            <br />
+            {}
+            """.format(df_out_err.to_html(index=False, na_rep='', justify='left'))
+        else:
+            str_msg2 = ''
 
-    # This is always get sent to the users, as they should always be notified when the run has completed.
-    arb = AdminReportBot()
-    arb.send(str_listname=str_listname_rm_im_all, str_subject=str_subject, df=df_out_ok, str_msg=str_msg, str_msg2=str_msg2)
+        # This is always get sent to the users, as they should always be notified when the run has completed.
+        arb = AdminReportBot()
+        arb.send(str_listname=str_listname_rm_im_all, str_subject=str_subject, df=df_out_ok, str_msg=str_msg, str_msg2=str_msg2)
 
 
 def get_datarun_sched(run_id, conn):
