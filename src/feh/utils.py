@@ -252,33 +252,34 @@ def check_datarun_not_logged(t_timenow, conn):
         arb.send(str_listname=str_listname, str_subject=str_subject, df=df_out_err, str_msg=str_msg, str_msg2=str_msg2)
 
     # SEND MESSAGE TO INFORM USERS ABOUT SUCCESSFUL RUN #
+    str_listname_rm_im_all = 'fehdw_admin'  # To switch this back to 'rm_im_all' when LIVE.
+
     if len(df_out_ok) > 0:
-        df_out_ok = df_out_ok[['run_id', 'time_from', 'time_to']]
+        df_out_ok = df_out_ok[['run_id', 'time_from', 'time_to']]  # Show users only some relevant columns.
 
-        str_msg = """
-        Hello! The following scheduled data runs have been completed, and the associated data marts are ready for 
-        use in your visualizations.
-        """  # In the outgoing email, "df_out_ok" will appear immediately below this message.
+    str_msg = """
+    Hello! The following scheduled data runs have been completed, and the associated data marts are ready for 
+    use in your visualizations.
+    """  # In the outgoing email, "df_out_ok" will appear immediately below this message.
 
-        str_subject = '[{}] Data run completed'.format(str_listname)
+    str_subject = '[{}] Data run completed'.format(str_listname_rm_im_all)
 
-        # "str_msg2" will be constructed differently, depending on whether there are errors found.
-        if len(df_out_err) > 0:
-            str_subject = '[{}] Data run completed with errors'.format(str_listname)
+    # "str_msg2" will be constructed differently, depending on whether there are errors found (ie: df_out_err has rows).
+    if len(df_out_err) > 0:
+        str_subject = '[{}] Data run completed with errors'.format(str_listname_rm_im_all)
 
-            str_msg2 = """
-            Uh-oh! These data runs appear to have errors. The data marts will still load, but you might not get the latest data.
-            I will go notify the admins now! 
-            <br />
-            {}
-            """.format(df_out_err.to_html(index=False, na_rep='', justify='left'))
-        else:
-            str_msg2 = ''
+        str_msg2 = """
+        Uh-oh! These data runs appear to have errors. The data marts will still load, but you might not get the latest data.
+        I will go notify the admins now! 
+        <br />
+        {}
+        """.format(df_out_err.to_html(index=False, na_rep='', justify='left'))
+    else:
+        str_msg2 = ''
 
-        str_listname = 'fehdw_admin'  # To switch this back to 'rm_im_all' when LIVE.
-
-        arb = AdminReportBot()
-        arb.send(str_listname=str_listname, str_subject=str_subject, df=df_out_ok, str_msg=str_msg, str_msg2=str_msg2)
+    # This is always get sent to the users, as they should always be notified when the run has completed.
+    arb = AdminReportBot()
+    arb.send(str_listname=str_listname_rm_im_all, str_subject=str_subject, df=df_out_ok, str_msg=str_msg, str_msg2=str_msg2)
 
 
 def get_datarun_sched(run_id, conn):
