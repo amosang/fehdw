@@ -224,8 +224,10 @@ class DataRunner(object):
 
         pd.io.sql.execute(str_sql, self.conn_fehdw)
 
-    def drop_and_reload_data_marts(self, dt_date=None):
+    def drop_and_reload_data_marts(self, dt_date):
         """ Drops all data marts specified here; reloads them in correct order.
+        Able to do so for only the specified dt_date, or for all dates.
+
         Due to dependencies, dm1* tables must be re-created before dm2* types.
         Assumption is that the stg* tables are already up-to-date.
 
@@ -234,14 +236,15 @@ class DataRunner(object):
 
         IMPORTANT: If new data marts (ie: tables) are added, remember to extend the processing logic found here to include these new data marts!
 
-        :param dt_date:
-        :return:
+        :param dt_date: If explicitly given as "None", will drop all tables. Else if a date is given, will drop only records for that snapshot_dt.
+        :return: NA
         """
         # Create only 1 instance of each class, to avoid having 2 simultaneous instances of the same class, as this causes
         # file logger issues (2nd instance unable to get a lock on the log file and hence cannot write to it).
         of_dr = OccForecastDataRunner()
         op_dr = OperaOTBDataRunner()
         otai_dr = OTAIDataRunner()
+        fwk_dr = FWKDataRunner()
 
         if dt_date is None:
             # EzRMS and Market Occ Forecast #
@@ -319,8 +322,17 @@ class DataRunner(object):
             pd.io.sql.execute(str_sql, self.conn_fehdw)
             op_dr.remove_log_datarun(run_id='proc_target_adr_with_otb_price_fc', str_snapshot_dt=None)
             op_dr.proc_target_adr_with_otb_price_fc_all()
+
+            # Source Markets #
+            self.logger.info('DELETING DATA MART: {}'.format('dm1_fwk_source_markets'))
+            str_sql = """
+            DROP TABLE IF EXISTS dm1_fwk_source_markets;
+            """
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            fwk_dr.remove_log_datarun(run_id='proc_fwk_source_markets', str_snapshot_dt=None)
+            fwk_dr.proc_fwk_source_markets()
         else:
-            # PROCESS drop_and_reload FOR ONLY THE SPECIFIED DATE #
+            # PROCESS "drop_and_reload" FOR ONLY THE SPECIFIED DATE #
             str_date = dt.datetime.strftime(dt_date, '%Y-%m-%d')
 
             # EzRMS and Market Occ Forecast #
@@ -411,6 +423,15 @@ class DataRunner(object):
             op_dr.remove_log_datarun(run_id='proc_target_adr_with_otb_price_fc', str_snapshot_dt=str_date)
             op_dr.proc_target_adr_with_otb_price_fc_all(str_dt_from=str_date, str_dt_to=str_date)
 
+            # Source Markets #
+            self.logger.info('DELETING DATA MART: {} for snapshot_dt: {}'.format('dm1_fwk_source_markets', str_date))
+            str_sql = """
+            DELETE FROM dm1_fwk_source_markets WHERE snapshot_dt = '{}'
+            """.format(str_date)
+            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            fwk_dr.remove_log_datarun(run_id='proc_fwk_source_markets', str_snapshot_dt=str_date)
+            fwk_dr.proc_fwk_source_markets(str_dt_from=str_date, str_dt_to=str_date)
+
     @dec_err_handler(retries=0)
     def archive_data_marts(self, dt_date=dt.datetime.today()):
         """ Move records from specified data mart tables to their corresponding archive tables ("arc_*").
@@ -424,7 +445,7 @@ class DataRunner(object):
         date will still be okay.
         4) The technique used here is not transaction safe, as MyISAM DB engine does not support transactions.
         However, we do not expect to have issues, given that the manipulations happen in seconds, and purely at the DB layer only.
-        We also have the ability to rebuild the data marts from scratch, using only the staging tables.
+        We also have the ability to rebuild the data marts completely from scratch using only the staging tables, in the worse-case scenario.
         https://stackoverflow.com/questions/8036005/myisam-engine-transaction-support.
         :return: NA
         """
@@ -1258,3 +1279,82 @@ class OTAIDataRunner(DataRunner):
             self.proc_hotel_price_rank(dt_date=dt_date)  # Do data run for current date.
         else:
             self.logger.error('Missing data load for {} data for snapshot_dt: {}.'.format('OTAI Rates', str_date))
+
+
+class FWKDataRunner(DataRunner):
+    """ For generating data marts which primarily draw from FWK data.
+    """
+    def __init__(self):
+        super().__init__()
+        self.APP_NAME = self.config['datarunner']['fwk']['app_name']
+        self._init_logger(logger_name=self.APP_NAME + '_datareader', app_name=self.APP_NAME)
+
+    def __del__(self):
+        super().__del__()
+        self._free_logger()
+
+    @dec_err_handler(retries=0)
+    def proc_fwk_source_markets(self, dt_date=dt.datetime.today()):
+        """ Processes FWK data into a form that is suitable for source markets visualization, for the 1 given date only.
+        :param dt_date:
+        :return: NA
+        """
+        run_id = 'proc_fwk_source_markets'
+        str_date_from, str_date_to = feh.utils.split_date(dt_date)
+
+        if self.has_exceeded_datarun_freq(run_id=run_id, str_snapshot_dt=str_date_from):
+            self.logger.info('[{}] SKIPPING. Data already processed for snapshot_dt: {}'.format(run_id, str_date_from))
+        else:
+            str_sql = """
+            SELECT DATE(snapshot_dt) AS snapshot_dt, periodFrom AS stay_date, market, classification, value AS rm_nts FROM stg_fwk_otb
+            WHERE classification IN ('lengthOfStay1', 'lengthOfStay2', 'lengthOfStay3', 'lengthOfStay4')
+            AND snapshot_dt >= '{}' AND snapshot_dt < ' {}'
+            AND year = 0
+            ORDER BY snapshot_dt, stay_date
+            """.format(str_date_from, str_date_to)  # "year=0", because this represents the "current" year. "year=1" represents the "lookback" year which is used for comparison.
+
+            df_y0 = pd.read_sql(str_sql, self.conn_fehdw)
+
+            str_sql = """
+            SELECT DATE(snapshot_dt) AS snapshot_dt, periodFrom AS stay_date, market, classification, value AS rm_nts FROM stg_fwk_otb
+            WHERE classification IN ('lengthOfStay1', 'lengthOfStay2', 'lengthOfStay3', 'lengthOfStay4')
+            AND snapshot_dt >= '{}' AND snapshot_dt < ' {}'
+            AND year = 1
+            ORDER BY snapshot_dt, stay_date
+            """.format(str_date_from, str_date_to)
+
+            df_y1 = pd.read_sql(str_sql, self.conn_fehdw)
+
+            if (len(df_y0) > 0) & (len(df_y1) > 0):
+
+                df_y0['stay_date_old'] = df_y0['stay_date'] - pd.to_timedelta(364, unit='d')  # subtract 364 days to get same day-of-week adjustment.
+
+                df_merge = df_y0.merge(df_y1, how='inner',
+                                       left_on=['snapshot_dt', 'stay_date_old', 'market', 'classification'],
+                                       right_on=['snapshot_dt', 'stay_date', 'market', 'classification'],
+                                       suffixes=('_new', '_old'))
+
+                df_merge['rm_nts_var'] = df_merge['rm_nts_new'] - df_merge['rm_nts_old']
+
+                df_merge.rename(columns={'stay_date_new': 'stay_date'}, inplace=True)
+                df_merge['classification'] = df_merge['classification'].replace(to_replace={'lengthOfStay1': '1_nts', 'lengthOfStay2': '2_nts', 'lengthOfStay3': '3_nts', 'lengthOfStay4': '4-5_nts'})
+                df_merge = df_merge[['snapshot_dt', 'stay_date', 'market', 'classification', 'rm_nts_new', 'rm_nts_old', 'rm_nts_var']]  # Keep only these columns.
+
+                # WRITE TO DATABASE #
+                df_merge.to_sql('dm1_fwk_source_markets', self.conn_fehdw, index=False, if_exists='append')
+                self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
+            else:
+                self.logger.error('[{}] No records found in source table for snapshot_dt: {}'.format(run_id, str_date_from))
+
+            # LOG DATARUN #
+            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+
+    @dec_err_handler(retries=0)
+    def proc_fwk_source_markets_all(self, str_dt_from=None, str_dt_to=None):
+        """ Iterator method for repeated method calling.
+        """
+        run_id = 'proc_fwk_source_markets_all'
+        l_data_src_tabs = ['stg_fwk_otb']
+        str_func_name = 'proc_fwk_source_markets'
+        self._generic_run_all(run_id=run_id, l_data_src_tabs=l_data_src_tabs, str_func_name=str_func_name, str_dt_from=str_dt_from, str_dt_to=str_dt_to)
+

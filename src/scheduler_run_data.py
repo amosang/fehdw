@@ -5,7 +5,7 @@
 # This script is responsible for updating all data mart tables ("dm1*", "dm2*", etc), in the correct sequence.
 # It assumes that the "stg*" tables have already been updated.
 ######################################
-from feh.datarunner import DataRunner, OccForecastDataRunner, OperaOTBDataRunner, OTAIDataRunner
+from feh.datarunner import DataRunner, OccForecastDataRunner, OperaOTBDataRunner, OTAIDataRunner, FWKDataRunner
 import feh.utils
 import datetime as dt
 
@@ -14,6 +14,7 @@ d_run = DataRunner()  # Need this for the DB conn.
 of_drun = OccForecastDataRunner()
 op_drun = OperaOTBDataRunner()
 otai_drun = OTAIDataRunner()
+fwk_drun = FWKDataRunner()
 
 TIME_NOW = dt.datetime.now().time()  # Jobs to run within specific time windows
 dt_date = dt.datetime.today()
@@ -31,6 +32,7 @@ DEBUG = False  # SET BACK TO FALSE AFTER TESTING!
 # proc_op_otb_with_allot_diff
 # proc_hotel_price_otb_evolution
 # proc_hotel_price_only_evolution
+# proc_fwk_source_markets
 
 # run_id: proc_hotel_price_rank #
 t_from, t_to = feh.utils.get_datarun_sched(run_id='proc_hotel_price_rank', conn=d_run.conn_fehdw)
@@ -62,6 +64,10 @@ if DEBUG | (t_from <= TIME_NOW < t_to):
     else:
         otai_drun.logger.error('Missing data load for {} data for snapshot_dt: {}.'.format('OTAI Rates', str_date))
 
+# run_id: proc_fwk_source_markets #
+t_from, t_to = feh.utils.get_datarun_sched(run_id='proc_fwk_source_markets', conn=d_run.conn_fehdw)
+if DEBUG | (t_from <= TIME_NOW < t_to):
+    fwk_drun.proc_fwk_source_markets(dt_date=dt_date)
 
 # RUN TIME: 0930-1000 HRS #
 # proc_occ_forecasts

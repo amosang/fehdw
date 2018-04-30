@@ -9,6 +9,7 @@ import logging
 import shutil
 import requests
 import sqlalchemy
+import feh.utils
 from configobj import ConfigObj
 from pandas import DataFrame, Series
 from feh.utils import dec_err_handler, get_files, MaxDataLoadException
@@ -78,10 +79,62 @@ class DataReader(object):
             handler.close()
             self.logger.removeHandler(handler)
 
-    @classmethod
-    def print_cfg(cls):
-        for key, value in cls.config.iteritems():
-            print(key, value, '\n')
+    def drop_and_reload_staging_tables(self, dt_date):
+        """ For a given snapshot_dt, delete all records from ALL staging tables (ie: "stg*").
+        For use in fixing the situation where 1 or more data sources failed or was corrupted, on a particular date.
+
+        Assumptions:
+        1) Whatever errors in the data sources have all been rectified.
+        2) All the correct and necessary data files are in place in their corresponding folders.
+
+        :param dt_date:
+        :return: NA
+        """
+        str_date_from, str_date_to = feh.utils.split_date(dt_date=dt_date)
+
+        # CREATING 1 INSTANCE OF EACH DATA READER CLASS #
+        ezrms_dr = EzrmsDataReader()
+        fwk_dr = FWKDataReader()
+        op_dr = OperaDataReader()
+        otai_dr = OTAIDataReader()
+
+        # GET LIST OF TABLE NAMES, FOR WHICH TO DROP RECORDS #
+        str_sql_tabs = """
+        SELECT table_name FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_NAME LIKE 'stg%%'
+        AND COLUMN_NAME = 'snapshot_dt'
+        ORDER BY table_name
+        """  # Note the double "%" signs. It's for escaping Python, so that only 1 "%" is sent to MySQL.
+        df_tabs = pd.read_sql(str_sql_tabs, self.db_conn)
+
+        # DROP THE RELEVANT RECORDS FOR EACH TABLE #
+        for idx, row in df_tabs.iterrows():
+            str_tab_name = row['table_name']
+
+            self.logger.info('DELETING STAGING TABLE: {}'.format(str_tab_name))
+
+            str_sql = """
+            DELETE FROM {}
+            WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}'
+            """.format(str_tab_name, str_date_from, str_date_to)  # Recall that in staging tables, snapshot_dt contains a timestamp, hence a selection range is required.
+
+            ##pd.io.sql.execute(str_sql, self.db_conn)
+
+        # DROP ALL DATA LOAD LOGS, FOR THE GIVEN DATE #
+        self.logger.info('Deleting all data load logs for snapshot_dt: {}'.format(str_date_from))
+        str_sql = """
+        DELETE FROM sys_log_dataload
+        WHERE DATE(timestamp) = '{}'
+        """.format(str_date_from)
+
+        ##pd.io.sql.execute(str_sql, self.db_conn)
+
+        # RELOAD DATA FOR SPECIFIC DATE #
+        self.logger.info('Reloading staging tables')
+        ezrms_dr.load(dt_snapshot_dt=dt_date)
+        fwk_dr.load(dt_snapshot_dt=dt_date)
+        op_dr.load(dt_snapshot_dt=dt_date)
+        otai_dr.load(dt_snapshot_dt=dt_date)
 
     def log_dataload(self, source, dest, file):
         """ For logging data loads. Timestamp used is current time.
@@ -194,7 +247,7 @@ class OperaDataReader(DataReader):
         self._free_logger()
 
     @dec_err_handler(retries=0)  # Logs unforeseen exceptions. Put here, so that the next file load will be unaffected if earlier one fails.
-    def load_otb(self, pattern=None):
+    def load_otb(self, pattern=None, dt_snapshot_dt=None):
         """ Loads Opera OTB file which matches the pattern. There should only be 1 per day.
         Also used to load History/Actuals file, because it has a similar format.
         :param pattern: Regular expression, to use for filtering file name.
@@ -278,12 +331,18 @@ class OperaDataReader(DataReader):
 
         # Merge all the Revenue dfs. They were originally separated due to bandwidth limitations of the "Vision" extraction tool.
         df_merge_rev = pd.concat([df_rev_ohs_tqh, df_rev_oph_tes, df_rev_rhs_amoy, df_rev_vhac_vhb, df_rev_vhc_vhk])
-        df_merge_rev['snapshot_dt'] = dt.datetime.today()
+        if dt_snapshot_dt is None:
+            df_merge_rev['snapshot_dt'] = dt.datetime.now()
+        else:
+            df_merge_rev['snapshot_dt'] = dt_snapshot_dt
 
         # Merge all the non-Revenue dfs, using Reservation as the base. They are said to be of 1-to-1 relationship.
         l_dfs = [df_reservation, df_allotment, df_arr_depart, df_sales, df_guest_profile, df_no_of_guest]
         df_merge_nonrev = functools.reduce(lambda left, right: pd.merge(left, right, on=['confirmation_no', 'resort']), l_dfs)
-        df_merge_nonrev['snapshot_dt'] = dt.datetime.today()
+        if dt_snapshot_dt is None:
+            df_merge_nonrev['snapshot_dt'] = dt.datetime.now()
+        else:
+            df_merge_nonrev['snapshot_dt'] = dt_snapshot_dt
 
         # TYPE CONVERSIONS #
         # errors='coerce' is needed sometimes because of presence of blanks (no dob given). Blanks will thus be converted to NaT.
@@ -318,7 +377,7 @@ class OperaDataReader(DataReader):
         #os.remove(str_fn_dst)  # Thought: Might want to keep the copied files, to re-create error situations.
 
     @dec_err_handler(retries=0)  # Logs unforeseen exceptions. Put here, so that the next file load will be unaffected if earlier one fails.
-    def load_cag(self, pattern=None):
+    def load_cag(self, pattern=None, dt_snapshot_dt=None):
         """ Loads Opera CAG file which matches the pattern. There should only be 1 per day.
         :param pattern: Regular expression, to use for filtering file name.
         :return: None
@@ -376,7 +435,11 @@ class OperaDataReader(DataReader):
                               'considered_date', 'origin_code', 'country_code', 'company'], axis=1, inplace=True)
         df_merge = df_merge[df_merge.columns[~df_merge.columns.str.endswith('_y')]]  # Keep only columns with no "_y" suffix.
         df_merge.columns = df_merge.columns.str.replace('_x$', '')  # For the column names with the "_x" suffix, remove the suffix part.
-        df_merge['snapshot_dt'] = dt.datetime.now()
+
+        if dt_snapshot_dt is None:
+            df_merge['snapshot_dt'] = dt.datetime.now()
+        else:
+            df_merge['snapshot_dt'] = dt_snapshot_dt
 
         # WRITE TO DATABASE #
         self.logger.info('Loading file contents to data warehouse.')
@@ -390,14 +453,15 @@ class OperaDataReader(DataReader):
         # Remove the temp file copy.
         #os.remove(str_fn_dst)  # Thought: Might want to keep the copied files, to re-create error situations.
 
-    def load(self):
+    def load(self, dt_snapshot_dt=None):
         """ Loads data from a related cluster of data sources.
+        If dt_snapshot_dt is given, will use this as the snapshot_dt, instead of the current run date.
         :return:
         """
-        self.load_otb(pattern='60 days.xlsx$')  # OTB 0-60 days onwards. Currently always picks the last modified file with this file name.
-        self.load_otb(pattern='61 days.xlsx$')  # OTB 61 days onwards.
-        self.load_otb(pattern='History.xlsx$')  # History (aka: Actuals)
-        self.load_cag(pattern='CAG.xlsx$')      # CAG (Corporate Groups Allocations)
+        self.load_otb(pattern='60 days.xlsx$', dt_snapshot_dt=None)  # OTB 0-60 days onwards. Currently always picks the last modified file with this file name.
+        self.load_otb(pattern='61 days.xlsx$', dt_snapshot_dt=None)  # OTB 61 days onwards.
+        self.load_otb(pattern='History.xlsx$', dt_snapshot_dt=None)  # History (aka: Actuals)
+        self.load_cag(pattern='CAG.xlsx$', dt_snapshot_dt=None)      # CAG (Corporate Groups Allocations)
 
 
 class OTAIDataReader(DataReader):
@@ -437,7 +501,7 @@ class OTAIDataReader(DataReader):
         super().__del__()
         self._free_logger()
 
-    def load_hotels(self):
+    def load_hotels(self, dt_snapshot_dt=None):
         """ Loads Hotels and Compset IDs to data warehouse. We need the IDs for further queries (eg: rates).
         As the list of hotels and compset can change without notice, we will load this once per day, overwriting the existing table.
         """
@@ -450,7 +514,10 @@ class OTAIDataReader(DataReader):
         l_hotelid = [25002, 25105, 25106, 25107, 25109, 25119, 25167, 296976, 359549, 613872, 1663218]  # 11 hotels
         df_hotels['hotel_category'] = 'sr'  # default value.
         df_hotels['hotel_category'][df_hotels['HotelID'].isin(l_hotelid)] = 'hotel'
-        df_hotels['snapshot_dt'] = dt.datetime.now()
+        if dt_snapshot_dt is None:
+            df_hotels['snapshot_dt'] = dt.datetime.now()
+        else:
+            df_hotels['snapshot_dt'] = dt_snapshot_dt
 
         # Keep only the CompsetID = 1 (ie: CompsetName = 'App Primary'). Ignore secondary compset.
         df_hotels = df_hotels[df_hotels['CompsetID'] == 1]
@@ -492,7 +559,7 @@ class OTAIDataReader(DataReader):
             raise Exception(str_err)
 
     @dec_err_handler(retries=0)
-    def load_rates(self):
+    def load_rates(self, dt_snapshot_dt=None):
         SOURCE = self.SOURCE_NAME  # 'otai'
         DEST = 'mysql'
         FILE = 'rates'
@@ -516,7 +583,10 @@ class OTAIDataReader(DataReader):
         df_all['HotelID'] = df_all['HotelID'].astype(str)  # Standardize and convert all ID-type fields to string.
 
         self.logger.info('Hotel Rates: Loading to data warehouse.')
-        df_all['snapshot_dt'] = dt.datetime.today()  # Add a timestamp when the data was loaded.
+        if dt_snapshot_dt is None:
+            df_all['snapshot_dt'] = dt.datetime.now()  # Add a timestamp when the data was loaded.
+        else:
+            df_all['snapshot_dt'] = dt_snapshot_dt
 
         # WRITE TO DATABASE #
         df_all.to_sql('stg_otai_rates', self.db_conn, index=False, if_exists='append')
@@ -532,11 +602,12 @@ class OTAIDataReader(DataReader):
         self.logger.info('Hotel Rates: Logged data load activity to system log table.')
         self.log_dataload(source='otai', dest='mysql', file='rates')
 
-    def load(self):
+    def load(self, dt_snapshot_dt=None):
         """ Loads data from a related cluster of data sources.
+        If dt_snapshot_dt is given, will use this as the snapshot_dt, instead of the current run date.
         """
-        self.load_hotels()  # This must run first, in case the CompSet has been changed.
-        self.load_rates()
+        self.load_hotels(dt_snapshot_dt=None)  # This must run first, in case the CompSet has been changed.
+        self.load_rates(dt_snapshot_dt=None)
 
 
 class FWKDataReader(DataReader):
@@ -555,7 +626,7 @@ class FWKDataReader(DataReader):
         self._free_logger()
 
     @dec_err_handler()  # Logs unforeseen exceptions. Put here, so that the next file load will be unaffected if earlier one fails.
-    def load_projected_and_otb(self, pattern=None, type=None):
+    def load_projected_and_otb(self, pattern=None, type=None, dt_snapshot_dt=None):
         """ Loads FWK Projected filename which matches the given pattern. There should only be 1 per day.
         Also used to load FWK OTB file, because it has a similar format.
         :param pattern: Regular expression, to use for filtering file name.
@@ -585,7 +656,10 @@ class FWKDataReader(DataReader):
         df['year'] = df['year'].astype(str)
         df['periodFrom'] = pd.to_datetime(df['periodFrom'], format='%d/%m/%Y')
         df['periodTo'] = pd.to_datetime(df['periodTo'], format='%d/%m/%Y')
-        df['snapshot_dt'] = dt.datetime.today()  # Add timestamp as handle.
+        if dt_snapshot_dt is None:
+            df['snapshot_dt'] = dt.datetime.now()  # Add timestamp as handle.
+        else:
+            df['snapshot_dt'] = dt_snapshot_dt
 
         self.logger.info('Loading file contents to data warehouse.')
         if type == 'projected':
@@ -601,11 +675,12 @@ class FWKDataReader(DataReader):
         #Remove the temp file copy.
         #os.remove(str_fn_dst)
 
-    def load(self):
+    def load(self, dt_snapshot_dt=None):
         """ Loads data from a related cluster of data sources.
+        If dt_snapshot_dt is given, will use this as the snapshot_dt, instead of the current run date.
         """
-        self.load_projected_and_otb(pattern='^FWK_PROJ.+csv$', type='projected')  # eg: FWK_PROJ_29JAN2018.csv
-        self.load_projected_and_otb(pattern='^FWK.+SCREEN1.csv$', type='otb')  # eg: FWK_29JAN2018_SCREEN1.csv
+        self.load_projected_and_otb(pattern='^FWK_PROJ.+csv$', type='projected', dt_snapshot_dt=None)  # eg: FWK_PROJ_29JAN2018.csv
+        self.load_projected_and_otb(pattern='^FWK.+SCREEN1.csv$', type='otb', dt_snapshot_dt=None)  # eg: FWK_29JAN2018_SCREEN1.csv
 
 
 class EzrmsDataReader(DataReader):
@@ -621,7 +696,7 @@ class EzrmsDataReader(DataReader):
         self._free_logger()
 
     @dec_err_handler(retries=5)
-    def load_forecast(self):
+    def load_forecast(self, dt_snapshot_dt=None):
         """ Download and load the Forecast TSV file. Transforms the data set from wide to long as well.
         Note: If the layout of the Forecast TSV file changes (eg: due to addition of new hotels), the code to read the
         source file needs to change too. The database table schema however, is already in long form and can continue as-is.
@@ -700,7 +775,10 @@ class EzrmsDataReader(DataReader):
 
         df = pd.wide_to_long(df_forecast, ['OCC_', 'P_'], j='hotel_code', i='DATE', suffix='.+').reset_index()
         df.columns = ['date', 'hotel_code', 'occ_rooms', 'occ_percent']
-        df['snapshot_dt'] = dt.datetime.today()
+        if dt_snapshot_dt is None:
+            df['snapshot_dt'] = dt.datetime.now()
+        else:
+            df['snapshot_dt'] = dt_snapshot_dt
         df_forecast = df
 
         self.logger.info('Writing to database.')
@@ -713,10 +791,11 @@ class EzrmsDataReader(DataReader):
         driver.close()  # Close the browser
         os.remove(str_fn_with_path)  # Delete the TSV file.
 
-    def load(self):
+    def load(self, dt_snapshot_dt=None):
         """ Loads data from a related cluster of data sources.
+        If dt_snapshot_dt is given, will use this as the snapshot_dt, instead of the current run date.
         """
-        self.load_forecast()  # EzRMS's forecast of what the occupancies. Tightly coupled with the EzRMS report used.
+        self.load_forecast(dt_snapshot_dt=None)  # EzRMS's forecast of what the occupancies. Tightly coupled with the EzRMS report used.
 
 
 class EloquaB2CDataReader(DataReader):
