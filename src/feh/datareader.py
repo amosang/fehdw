@@ -118,7 +118,7 @@ class DataReader(object):
             WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}'
             """.format(str_tab_name, str_date_from, str_date_to)  # Recall that in staging tables, snapshot_dt contains a timestamp, hence a selection range is required.
 
-            ##pd.io.sql.execute(str_sql, self.db_conn)
+            pd.io.sql.execute(str_sql, self.db_conn)
 
         # DROP ALL DATA LOAD LOGS, FOR THE GIVEN DATE #
         self.logger.info('Deleting all data load logs for snapshot_dt: {}'.format(str_date_from))
@@ -127,7 +127,7 @@ class DataReader(object):
         WHERE DATE(timestamp) = '{}'
         """.format(str_date_from)
 
-        ##pd.io.sql.execute(str_sql, self.db_conn)
+        pd.io.sql.execute(str_sql, self.db_conn)
 
         # RELOAD DATA FOR SPECIFIC DATE #
         self.logger.info('Reloading staging tables')
