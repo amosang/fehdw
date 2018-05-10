@@ -659,7 +659,7 @@ class OperaOTBDataRunner(DataRunner):
                     # Tidying up. Putting in of new columns.
                     df_diff.reset_index(inplace=True, drop=False)
                     df_diff['days_ago'] = days  # New column to store how many days ago
-                    df_diff['snapshot_dt'] = dt_date
+                    df_diff['snapshot_dt'] = dt_date.date()  # This is a "dm2"; we want only the date component.
 
                     df_all = df_all.append(df_diff)
 
