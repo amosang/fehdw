@@ -742,12 +742,15 @@ class OperaOTBDataRunner(DataRunner):
 
             df_merge2 = df_merge.merge(df_price_rank, how='inner', on=['snapshot_dt', 'stay_date', 'hotel_code'])
 
-            # WRITE TO DATABASE #
-            df_merge2.to_sql('dm2_adr_occ_fc_price', self.conn_fehdw, index=False, if_exists='append')
-            self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
+            if len(df_merge2) > 0:
+                # WRITE TO DATABASE #
+                df_merge2.to_sql('dm2_adr_occ_fc_price', self.conn_fehdw, index=False, if_exists='append')
+                self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
 
-            # LOG DATA RUN #
-            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+                # LOG DATA RUN #
+                self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+            else:
+                self.logger.error('[{}] No records found in one of the source tables for snapshot_dt: {}'.format(run_id, str_date_from))
 
     @dec_err_handler(retries=0)
     def proc_target_adr_with_otb_price_fc_all(self, str_dt_from=None, str_dt_to=None):
@@ -1205,7 +1208,7 @@ class OTAIDataRunner(DataRunner):
 
             df_otai = pd.read_sql(str_sql_otai, self.conn_fehdw)
 
-            if (len(df_otb) > 0) & (len(df_otai) > 0):
+            if (len(df_otb) > 0) | (len(df_otai) > 0):
                 df_merge = df_otb.merge(df_otai, how='inner', on=['otai_hotel_id', 'stay_date'])
 
                 # WRITE TO DATABASE #
@@ -1215,7 +1218,7 @@ class OTAIDataRunner(DataRunner):
                 # LOG DATA RUN #
                 self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
             else:
-                self.logger.error('[{}] No records found in source tables for snapshot_dt: {}'.format(run_id, str_date_from))
+                self.logger.error('[{}] No records found in EITHER source tables for snapshot_dt: {}'.format(run_id, str_date_from))
 
     @dec_err_handler(retries=0)
     def proc_hotel_price_otb_evolution_all(self, str_dt_from=None, str_dt_to=None):
