@@ -10,6 +10,8 @@ import logging
 import shutil
 import requests
 import sqlalchemy
+import subprocess
+import zipfile
 from configobj import ConfigObj
 from pandas import DataFrame, Series
 import feh.utils
@@ -26,6 +28,7 @@ class DataRunner(object):
 
     def __init__(self):
         # CREATE CONNECTION TO DB #  All data movements involve the database, so this is very convenient to have.
+        # fehdw
         str_host = self.config['data_sources']['mysql']['host']
         str_userid = self.config['data_sources']['mysql']['userid']
         str_password = self.config['data_sources']['mysql']['password']
@@ -34,11 +37,21 @@ class DataRunner(object):
         engine = sqlalchemy.create_engine(str_conn_mysql, echo=False)
         self.conn_fehdw = engine.connect()
 
+        # listman
+        str_host = self.config['data_sources']['mysql_listman']['host']
+        str_userid = self.config['data_sources']['mysql_listman']['userid']
+        str_password = self.config['data_sources']['mysql_listman']['password']
+        str_db = self.config['data_sources']['mysql_listman']['db']
+        str_conn_mysql = f'mysql+pymysql://{str_userid}:{str_password}@{str_host}/{str_db}?charset=utf8mb4'
+        engine = sqlalchemy.create_engine(str_conn_mysql, echo=False)
+        self.conn_listman = engine.connect()
+
         self.APP_NAME = self.config['datarunner']['datarunner']['app_name']
         self._init_logger(logger_name='datarunner', app_name=self.APP_NAME)
 
     def __del__(self):
         self.conn_fehdw.close()
+        self.conn_listman.close()
         self._free_logger()
 
     def _init_logger(self, logger_name='datarunner', app_name=None):
@@ -501,6 +514,91 @@ class DataRunner(object):
 
                 # WRITE TO LOG FILE #
                 self.logger.info('[{}] Archived table: {} on snapshot_dt: {}. Used cutoff date {}'.format(run_id, str_tab, str_date_from, str_dt_cutoff))  # Do detailed logging in the log file only.
+
+            # LOG DATA RUN #
+            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+
+    @dec_err_handler(retries=0)
+    def backup_tables(self, dt_date=dt.datetime.today()):
+        """ Outputs selected tables using mysqldump.exe utility. Zips the files into archives.
+        Allows for selective restoration of tables, in case of accidental deletion.
+        Will maintain n=7 of such ZIP files at any one time (older archives are deleted).
+
+        Note: Each ZIP file is about 500 MB; component text files come to about 6 GB.
+        """
+        run_id = 'backup_tables'
+        str_date_from, str_date_to = split_date(dt_date)
+
+        if self.has_exceeded_datarun_freq(run_id=run_id, str_snapshot_dt=str_date_from):
+            self.logger.info('[{}] SKIPPING. Backup of tables is already done for snapshot_dt: {}'.format(run_id, str_date_from))
+        else:
+            self.logger.info('STARTING SELECTED TABLES BACKUP')
+
+            str_dir = 'C:/fehdw/mysql_backups'
+            str_date = dt.datetime.strftime(dt_date, format='%Y%m%d')  # Note the format. This variable is for printing only.
+            str_fn_zip_full = f'{str_dir}/{str_date}.zip'
+
+            # DUMP LISTMAN TABLES #
+            str_userid = self.config['data_sources']['mysql_listman']['userid']
+            str_pw = self.config['data_sources']['mysql_listman']['password']
+
+            str_cmd = f'"C:\Program Files\MySQL\MySQL Workbench 6.3 CE\mysqldump.exe" -u {str_userid} -p{str_pw} listman > "{str_dir}/listman_db.sql"'
+            subprocess.run(str_cmd, shell=True)
+
+            # DUMP FEHDW TABLES #
+            # To backup these tables only. cfg*, sys*, stg*.
+            l_tabs = [
+                'cfg_mail_lists',
+                'cfg_map_properties',
+                'stg_ezrms_forecast',
+                'stg_fwk_otb',
+                'stg_fwk_proj',
+                'stg_op_act_nonrev',
+                'stg_op_act_rev',
+                'stg_op_cag',
+                'stg_op_otb_nonrev',
+                'stg_op_otb_rev',
+                'stg_otai_hotels',
+                'stg_otai_rates',
+                'sys_cfg_dataload_freq',
+                'sys_cfg_dataload_sched',
+                'sys_cfg_datarun_freq',
+                'sys_cfg_datarun_sched',
+                'sys_cfg_dm_archive_lookback'
+            ]
+
+            str_userid = self.config['data_sources']['mysql']['userid']
+            str_pw = self.config['data_sources']['mysql']['password']
+
+            for tab in l_tabs:
+                str_cmd = f'"C:\Program Files\MySQL\MySQL Workbench 6.3 CE\mysqldump.exe" -u {str_userid} -p{str_pw} fehdw {tab} > "{str_dir}/{tab}.sql"'
+                subprocess.run(str_cmd, shell=True)
+
+            # ZIP. Compression ratio quite good.
+            l_files = feh.utils.get_files(str_folder=str_dir, pattern='.sql$')  # Take only all *.sql files.
+
+            if len(l_files):
+                with zipfile.ZipFile(str_fn_zip_full, 'w', compression=zipfile.ZIP_DEFLATED) as f_zip:  # f_zip will close itself, given the "with" construct.
+                    for (str_fn_full, str_fn) in l_files:
+                        f_zip.write(filename=str_fn_full, arcname=str_fn)  # Add file to ZIP archive.
+
+            # DELETE ALL *.sql FILES #
+            for (str_fn_full, str_fn) in l_files:
+                os.remove(str_fn_full)
+
+            # KEEP ONLY THE LATEST n number of ZIP FILES #
+            n = 7  # Number of ZIP files to keep.
+
+            for path, subdirs, files in os.walk(str_dir):
+                l_files = sorted(files, key=lambda name: os.path.getmtime(os.path.join(path, name)),
+                                 reverse=True)  # List of files in descending order of modified time.
+
+            if len(l_files) > n:
+                for file in l_files[n:]:
+                    os.remove(os.path.join(path, file))
+
+            # WRITE TO LOG FILE #
+            self.logger.info('[{}] Selected tables dumped and zipped.'.format(run_id))
 
             # LOG DATA RUN #
             self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)

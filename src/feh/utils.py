@@ -397,7 +397,7 @@ def archive_logs(truncate=False):
 
     # ZIP AND ARCHIVE THE LOG FILES #
     if len(l_files):
-        with zipfile.ZipFile(str_fn_zip_full, 'w') as f_zip:  # f_zip will close itself, given the "with" construct.
+        with zipfile.ZipFile(str_fn_zip_full, 'w', compression=zipfile.ZIP_DEFLATED) as f_zip:  # f_zip will close itself, given the "with" construct.
             for (str_fn_full, str_fn) in l_files:
                 f_zip.write(filename=str_fn_full, arcname=str_fn)  # Add file to ZIP archive.
 

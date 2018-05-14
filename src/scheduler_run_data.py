@@ -106,8 +106,13 @@ t_from, t_to = feh.utils.get_datarun_sched(run_id='archive_data_marts', conn=d_r
 if DEBUG | (t_from <= TIME_NOW < t_to):
     d_run.archive_data_marts(dt_date=dt_date)
 
+# run_id: backup_tables #
+t_from, t_to = feh.utils.get_datarun_sched(run_id='backup_tables', conn=d_run.conn_fehdw)
+if DEBUG | (t_from <= TIME_NOW < t_to):
+    d_run.archive_data_marts(dt_date=dt_date)
+
 # CHECK IF DATA RUN HAS COMPLETED SUCCESSFULLY #
-# Technique: In each half hour time slot, the code above will run data, and must create a log entry if successful.
+# Technique: In each half hour time slot, the code above will run data, and MUST create a log entry if successful.
 # This check uses the presence of a corresponding log entry to determine if a data run is successful.
 # If unsuccessful, an email is sent to the mailing list "fehdw_admin". Comment out below line to disable, if necessary.
 # If successful, an email is sent to the Revenue/Inventory Manager mailing list, to inform them that the data mart is ready to be used.
