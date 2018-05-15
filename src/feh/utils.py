@@ -240,7 +240,7 @@ def check_datarun_not_logged(t_timenow, conn):
     if len(df_out_err) > 0:  # ie: There are some scheduled data runs without the corresponding entries in the log table. Implies that a data run error has happened.
         df_out_err = df_out_err[['run_id', 'time_from', 'time_to']]  # Columns go out of order during append.
         str_msg = """
-        It appears that one or more of your scheduled data runs has failed!
+        Oh no, it appears that one or more of your scheduled data runs has failed!
         See the list below for details of which scheduled runs have problems.
         """
         str_msg2 = """

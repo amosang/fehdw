@@ -109,7 +109,7 @@ if DEBUG | (t_from <= TIME_NOW < t_to):
 # run_id: backup_tables #
 t_from, t_to = feh.utils.get_datarun_sched(run_id='backup_tables', conn=d_run.conn_fehdw)
 if DEBUG | (t_from <= TIME_NOW < t_to):
-    d_run.archive_data_marts(dt_date=dt_date)
+    d_run.backup_tables(dt_date=dt_date)
 
 # CHECK IF DATA RUN HAS COMPLETED SUCCESSFULLY #
 # Technique: In each half hour time slot, the code above will run data, and MUST create a log entry if successful.
