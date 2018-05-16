@@ -253,7 +253,7 @@ def check_datarun_not_logged(t_timenow, conn):
 
     # SEND MESSAGE TO INFORM USERS ABOUT SUCCESSFUL RUN #
     if len(df_out_ok) > 0:  # This len check is important! It prevents an email from being sent out if no scheduled datarun was run!
-        str_listname_rm_im_all = 'fehdw_admin'  # To switch this back to 'rm_im_all' when LIVE.
+        str_listname_rm_im_all = 'rm_im_all'  # To switch this back to 'rm_im_all' when LIVE.
 
         df_out_ok = df_out_ok[['run_id', 'time_from', 'time_to']]  # Show users only some relevant columns.
 
