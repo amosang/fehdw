@@ -230,11 +230,10 @@ def check_datarun_not_logged(t_timenow, conn):
                 else:
                     df_out_ok = df_out_ok.append(row, ignore_index=True)
 
-    # Users don't want to know about it if archival of data marts works. Hence we remove run_id='archive_data_marts'
-    # from df_out_ok, but not from df_out_err (because the admins will want to know if there's an error).
+    # Users don't want to know about the processing status of certain run_ids (eg: archive_data_marts, backup_tables), as these are system related.
+    # We eliminated these run_ids from df_out_ok, but not from df_out_err, because the admins will want to know if there's an error.
     if len(df_out_ok) > 0:
-        df_out_ok = df_out_ok[~df_out_ok['run_id'].isin(['archive_data_marts'])]
-
+        df_out_ok = df_out_ok[df_out_ok['to_notify'] == 1]
 
     # SEND MESSAGE TO INFORM ADMINS ABOUT ERRONEOUS RUN #
     if len(df_out_err) > 0:  # ie: There are some scheduled data runs without the corresponding entries in the log table. Implies that a data run error has happened.
