@@ -612,7 +612,7 @@ class OperaOTBDataRunner(DataRunner):
     def __init__(self):
         super().__init__()
         self.APP_NAME = self.config['datarunner']['opera_otb']['app_name']
-        self._init_logger(logger_name=self.APP_NAME + '_datareader', app_name=self.APP_NAME)
+        self._init_logger(logger_name=self.APP_NAME + '_datarunner', app_name=self.APP_NAME)
 
     def __del__(self):
         super().__del__()
@@ -867,7 +867,7 @@ class OccForecastDataRunner(DataRunner):
     def __init__(self):
         super().__init__()
         self.APP_NAME = self.config['datarunner']['demand_forecast']['app_name']
-        self._init_logger(logger_name=self.APP_NAME + '_datareader', app_name=self.APP_NAME)
+        self._init_logger(logger_name=self.APP_NAME + '_datarunner', app_name=self.APP_NAME)
 
     def __del__(self):
         super().__del__()
@@ -1189,7 +1189,7 @@ class OTAIDataRunner(DataRunner):
     def __init__(self):
         super().__init__()
         self.APP_NAME = self.config['datarunner']['hotel_price_rank']['app_name']
-        self._init_logger(logger_name=self.APP_NAME + '_datareader', app_name=self.APP_NAME)
+        self._init_logger(logger_name=self.APP_NAME + '_datarunner', app_name=self.APP_NAME)
 
     def __del__(self):
         super().__del__()
@@ -1387,7 +1387,7 @@ class FWKDataRunner(DataRunner):
     def __init__(self):
         super().__init__()
         self.APP_NAME = self.config['datarunner']['fwk']['app_name']
-        self._init_logger(logger_name=self.APP_NAME + '_datareader', app_name=self.APP_NAME)
+        self._init_logger(logger_name=self.APP_NAME + '_datarunner', app_name=self.APP_NAME)
 
     def __del__(self):
         super().__del__()
