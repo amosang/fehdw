@@ -343,7 +343,7 @@ class DataRunner(object):
             """
             pd.io.sql.execute(str_sql, self.conn_fehdw)
             fwk_dr.remove_log_datarun(run_id='proc_fwk_source_markets', str_snapshot_dt=None)
-            fwk_dr.proc_fwk_source_markets()
+            fwk_dr.proc_fwk_source_markets_all()
         else:
             # PROCESS "drop_and_reload" FOR ONLY THE SPECIFIED DATE #
             str_date = dt.datetime.strftime(dt_date, '%Y-%m-%d')
@@ -443,7 +443,7 @@ class DataRunner(object):
             """.format(str_date)
             pd.io.sql.execute(str_sql, self.conn_fehdw)
             fwk_dr.remove_log_datarun(run_id='proc_fwk_source_markets', str_snapshot_dt=str_date)
-            fwk_dr.proc_fwk_source_markets(str_dt_from=str_date, str_dt_to=str_date)
+            fwk_dr.proc_fwk_source_markets_all(str_dt_from=str_date, str_dt_to=str_date)
 
     @dec_err_handler(retries=0)
     def archive_data_marts(self, dt_date=dt.datetime.today()):
@@ -548,7 +548,6 @@ class DataRunner(object):
             # DUMP FEHDW TABLES #
             # To backup these tables only. cfg*, sys*, stg*.
             l_tabs = [
-                'cfg_mail_lists',
                 'cfg_map_properties',
                 'stg_ezrms_forecast',
                 'stg_fwk_otb',

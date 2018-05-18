@@ -8,7 +8,7 @@ from feh.datareader import DataReader
 from feh.datarunner import DataRunner
 
 ##### CHANGE THIS TO THE SNAPSHOT_DT TO BE DELETED! #####
-STR_SNAPSHOT_DT_TO_DEL = '2018-'  # The snapshot_dt to be deleted. Format: "YYYY-MM-DD"
+STR_SNAPSHOT_DT_TO_DEL = '2018-05-18'  # The snapshot_dt to be deleted. Format: "YYYY-MM-DD"
 ###########
 
 try:
