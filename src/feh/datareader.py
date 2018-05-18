@@ -462,6 +462,68 @@ class OperaDataReader(DataReader):
         self.load_otb(pattern='61 days.xlsx$', dt_snapshot_dt=None)  # OTB 61 days onwards.
         self.load_otb(pattern='History.xlsx$', dt_snapshot_dt=None)  # History (aka: Actuals)
         self.load_cag(pattern='CAG.xlsx$', dt_snapshot_dt=None)      # CAG (Corporate Groups Allocations)
+        self.remove_duplicates()  # Eliminates duplicates in stg_op_otb_nonrev, potentially caused by "60" and "61" files. Uses today() by default.
+
+    def remove_duplicates(self, dt_snapshot_dt=dt.datetime.today()):
+        """ Will operate only on Table: stg_op_otb_nonrev. Not relevant elsewhere.
+        There are situations whereby if a guest stays for multiple stay_dates such that he crosses the boundary of
+        the "60" and "61" files, the Table will end up containing duplicates, because the nonrev part does not contain
+        stay_date as a column!
+
+        This method will do processing for either 1) The given snapshot_dt, or 2) For the entire table.
+        :return: NA
+        """
+        # Subset of ALL columns, EXCEPT for snapshot_dt.
+        l_subset = ['confirmation_no', 'resort', 'res_reserv_status', 'res_bkdroom_ct_lbl', 'res_roomty_lbl',
+                    'res_reserv_date', 'res_cancel_date', 'res_pay_method', 'res_credcard_ty', 'allot_allot_book_cde',
+                    'allot_allot_book_desc', 'arr_arrival_dt', 'arr_departure_dt', 'arr_arrival_time',
+                    'arr_departure_time', 'sale_comp_name', 'sale_zip_code', 'sale_sales_rep', 'sale_sales_rep_code',
+                    'sale_industry_code', 'sale_trav_agent_name', 'sale_sales_rep1', 'sale_sales_rep_code1',
+                    'sale_all_owner', 'gp_guest_ctry_cde', 'gp_nationality', 'gp_origin_code', 'gp_guest_lastname',
+                    'gp_guest_firstname', 'gp_guest_title_code', 'gp_spcl_req_desc', 'gp_email', 'gp_dob',
+                    'gp_vip_status_desc', 'ng_adults', 'ng_children', 'ng_extra_beds', 'ng_cribs', 'snapshot_dt2']
+
+        if dt_snapshot_dt is None:
+            # PROCESS ENTIRE TABLE, IF EXPLICITLY SET TO NONE #
+            str_sql = """
+            SELECT * FROM stg_op_otb_nonrev
+            """
+            df = pd.read_sql(str_sql, self.db_conn)
+            df2 = df  # So that can use df2, without re-reading the 3.8M row table again!
+            df2['snapshot_dt2'] = df2['snapshot_dt'].dt.date  # Get only the date component
+            df_not_dup = df2[~df2.duplicated(subset=l_subset)]  # Duplicates marked as True. Keep the non-dups.
+            df_not_dup.drop(labels=['snapshot_dt2'], axis=1, inplace=True)  # Eliminate the auxilliary column.
+
+            if len(df) != len(df_not_dup):  # Do so only if the number of records is different. Same means no change.
+                df_not_dup.to_sql('stg_op_otb_nonrev', self.db_conn, index=False, if_exists='replace')
+                self.logger.info('[remove_duplicates] Replaced ALL contents of Table: stg_op_otb_nonrev')
+        else:
+            # PROCESS ONLY FOR THE GIVEN snapshot_dt #
+            str_date_from, str_date_to = feh.utils.split_date(dt_snapshot_dt)
+
+            str_sql = """
+            SELECT * FROM stg_op_otb_nonrev
+            WHERE snapshot_dt >='{}' AND snapshot_dt <'{}'
+            """.format(str_date_from, str_date_to)
+
+            df = pd.read_sql(str_sql, self.db_conn)  # A subset of the table's contents; only for 1 snapshot_dt.
+            df['snapshot_dt2'] = df['snapshot_dt'].dt.date  # Get only the date component
+            df_not_dup = df[~df.duplicated(subset=l_subset)]  # Duplicates marked as True. Keep the non-dups.
+            df_not_dup.drop(labels=['snapshot_dt2'], axis=1, inplace=True)  # Eliminate the auxilliary column.
+
+            # DELETE RECORDS FOR THAT snapshot_dt #
+            if len(df) != len(df_not_dup):  # Do so only if the number of records is different. Same means no change.
+                str_sql = """
+                DELETE FROM stg_op_otb_nonrev
+                WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}'
+                """.format(str_date_from, str_date_to)
+
+                pd.io.sql.execute(str_sql, self.db_conn)
+                self.logger.info('[remove_duplicates] Deleted all records for snapshot_dt: {}'.format(str_date_from))
+
+                # PUT BACK THE DE-DUPLICATED RECORDS FOR THAT snapshot_dt #
+                df_not_dup.to_sql('stg_op_otb_nonrev', self.db_conn, index=False, if_exists='append')
+                self.logger.info('[remove_duplicates] Restored de-duplicated records back to table.')
 
 
 class OTAIDataReader(DataReader):
