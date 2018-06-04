@@ -460,7 +460,8 @@ class DataRunner(object):
         However, we do not expect to have issues, given that the manipulations happen in seconds, and purely at the DB layer only.
         We also have the ability to rebuild the data marts completely from scratch using only the staging tables, in the worse-case scenario.
         https://stackoverflow.com/questions/8036005/myisam-engine-transaction-support.
-        :return: NA
+
+        5) "str_date_from" is only used for logging, to prevent duplicate runs. It's not used in WHERE clauses.
         """
         run_id = 'archive_data_marts'
         str_date_from, str_date_to = split_date(dt_date)
@@ -743,8 +744,10 @@ class OperaOTBDataRunner(DataRunner):
                                                 'res_bkdroom_ct_lbl', 'rev_marketcode', 'booking_status_code'])[['rev_proj_room_nts', 'rev_rmrev_extax', 'rev_food_rev_inctax', 'rev_oth_rev_inctax']].sum()
 
                 if (len(df_new_grp) > 0) & (len(df_old_grp) > 0):  # Ensure that both df have records, to avoid crash when doing subtract().
-                    # Get the difference between the values of all columns. Recall that each df represents a data set for each snapshot_dt.
-                    df_diff = df_new_grp.subtract(df_old_grp)  # For subtract(), if indices are mismatched, the resultant set will contain the union of both dataframe's index!
+                    # Get the difference between the values of all columns. Recall that each df represents a GROUPED data set for each snapshot_dt.
+                    ## For subtract(), if indices are mismatched, the resultant set will contain the union of both dataframes' index!
+                    ## fill_value=0 -> It is possible that a key is present in EITHER df_new_grp OR df_old_grp only. So this code will correctly fill it with 0s, such that the subtraction to get the difference will be correct, instead of getting NaN.
+                    df_diff = df_new_grp.subtract(df_old_grp, fill_value=0)
 
                     # Bring in the original 'rev_proj_room_nts' as 'rev_proj_room_nts_new', for occupancy calculation at the Viz level.
                     df_diff = df_diff.merge(df_new_grp[['rev_proj_room_nts', 'rev_rmrev_extax']], how='left',
