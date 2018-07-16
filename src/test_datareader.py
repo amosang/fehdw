@@ -8,9 +8,9 @@ from feh.utils import *
 
 TEST_CASE = ''     ### TEST CASE!
 
-if TEST_CASE == 'remove_duplicates':
+if TEST_CASE == 'reload_op_files':
     op_dr = OperaDataReader()
-    op_dr.remove_duplicates()
+    op_dr.load()
 
 
 if TEST_CASE == 'check_dataload_not_logged':

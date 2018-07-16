@@ -239,10 +239,10 @@ class DataRunner(object):
 
     def drop_and_reload_data_marts(self, dt_date):
         """ Drops all data marts specified here; reloads them in correct order.
-        Able to do so for only the specified dt_date, or for all dates.
+        Has capability to do so for 1) Only the specified dt_date, 2) For all dates.
 
         Due to dependencies, dm1* tables must be re-created before dm2* types.
-        Assumption is that the stg* tables are already up-to-date.
+        ASSUMPTION IS THAT THE STG* TABLES ARE ALREADY UP-TO-DATE!
 
         For greater control over the process, something which is dropped will be reloaded soonest possible, instead of dropping all tables at once.
         Each logical group of tables will be treated as a set, and dropped as a set.

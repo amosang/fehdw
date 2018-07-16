@@ -336,13 +336,16 @@ def get_latest_file(str_folder=None, pattern=None):
     """
     Given a folder, return the last updated file in that folder.
     If pattern (regex) is given, apply pattern as a filter first.
+    :return: A tuple containing (<str_full_filename>, <filename>), or (None, None) if file pattern not found.
     """
     _, _, l_files = next(os.walk(str_folder))  # First, always get all files in the dir.
 
     # Apply pattern to filter l_files if pattern exists #
     if pattern is not None:
         l_files = [f for f in l_files if re.search(pattern, f)]
-        if len(l_files) == 0: raise Exception('No files found that match the given pattern.')
+        if len(l_files) == 0:
+            #raise Exception('No files found that match the given pattern.')
+            return None, None  # Let the calling method handle error logging instead.
 
     # Get last modified file, from the filtered list #
     dt_prev = None  # Initialize outside the loop.
@@ -357,7 +360,7 @@ def get_latest_file(str_folder=None, pattern=None):
             if dt_curr > dt_prev:  # Keep the most recent datetime value.
                 dt_prev = dt_curr
                 str_fn_prev = str_fn_curr
-    return (str_fn_prev, file)
+    return str_fn_prev, file
 
 
 def get_files(str_folder=None, pattern=None, latest_only=False):

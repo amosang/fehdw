@@ -456,13 +456,21 @@ class OperaDataReader(DataReader):
     def load(self, dt_snapshot_dt=None):
         """ Loads data from a related cluster of data sources.
         If dt_snapshot_dt is given, will use this as the snapshot_dt, instead of the current run date.
-        :return:
+        :return: N/A
         """
-        self.load_otb(pattern='60 days.xlsx$', dt_snapshot_dt=None)  # OTB 0-60 days onwards. Currently always picks the last modified file with this file name.
-        self.load_otb(pattern='61 days.xlsx$', dt_snapshot_dt=None)  # OTB 61 days onwards.
-        self.load_otb(pattern='History.xlsx$', dt_snapshot_dt=None)  # History (aka: Actuals)
-        self.load_cag(pattern='CAG.xlsx$', dt_snapshot_dt=None)      # CAG (Corporate Groups Allocations)
-        self.remove_duplicates()  # Eliminates duplicates in stg_op_otb_nonrev, potentially caused by "60" and "61" files. Uses today() by default.
+        # Check if any of the 3 files (60/61/CAG) files are missing, do not load anything Opera at all. This wil allow copy_last_snapshot_dt_dataset() functionality to be triggered. This defends against the scenario where only 60 or 61 file is missing. #
+        str_folder = self.config['data_sources']['opera']['root_folder']
+        _, str_fn1 = feh.utils.get_files(str_folder=str_folder, pattern='60 days.xlsx$', latest_only=True)
+        _, str_fn2 = feh.utils.get_files(str_folder=str_folder, pattern='61 days.xlsx$', latest_only=True)
+        _, str_fn3 = feh.utils.get_files(str_folder=str_folder, pattern='CAG.xlsx$', latest_only=True)
+        if (str_fn1 is None) | (str_fn2 is None) | (str_fn3 is None):
+            self.logger.error('[{}] Opera data loading terminated. Ensure that 60/61/CAG files are all present.'.format(self.SOURCE_NAME))
+        else:
+            self.load_otb(pattern='60 days.xlsx$', dt_snapshot_dt=None)  # OTB 0-60 days onwards. Currently always picks the last modified file with this file name.
+            self.load_otb(pattern='61 days.xlsx$', dt_snapshot_dt=None)  # OTB 61 days onwards.
+            self.load_cag(pattern='CAG.xlsx$', dt_snapshot_dt=None)  # CAG (Corporate Groups Allocations)
+            self.load_otb(pattern='History.xlsx$', dt_snapshot_dt=None)  # History (aka: Actuals)
+            self.remove_duplicates()  # Eliminates duplicates in stg_op_otb_nonrev, potentially caused by "60" and "61" files. Uses today() by default.
 
     def remove_duplicates(self, dt_snapshot_dt=dt.datetime.today()):
         """ Will operate only on Table: stg_op_otb_nonrev. Not relevant elsewhere.
@@ -470,7 +478,7 @@ class OperaDataReader(DataReader):
         the "60" and "61" files, the Table will end up containing duplicates, because the nonrev part does not contain
         stay_date as a column!
 
-        This method will do processing for either 1) The given snapshot_dt, or 2) For the entire table.
+        This method is capable of processing for either 1) The given snapshot_dt, or 2) For the entire table (if no snapshot_dt is given).
         :return: NA
         """
         # Subset of ALL columns, EXCEPT for snapshot_dt.
