@@ -571,6 +571,7 @@ class OTAIDataReader(DataReader):
         super().__del__()
         self._free_logger()
 
+    @dec_err_handler(retries=0)
     def load_hotels(self, dt_snapshot_dt=None):
         """ Loads Hotels and Compset IDs to data warehouse. We need the IDs for further queries (eg: rates).
         As the list of hotels and compset can change without notice, we will load this once per day, overwriting the existing table.

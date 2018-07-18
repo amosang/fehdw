@@ -6,7 +6,12 @@ from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataR
 from feh.utils import *
 
 
-TEST_CASE = ''     ### TEST CASE!
+TEST_CASE = 'debug_otai'     ### TEST CASE!
+
+if TEST_CASE == 'debug_otai':
+    otai_dr = OTAIDataReader()
+    otai_dr.load_rates()
+
 
 if TEST_CASE == 'reload_op_files':
     op_dr = OperaDataReader()
