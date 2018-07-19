@@ -576,6 +576,7 @@ class OTAIDataReader(DataReader):
         """ Loads Hotels and Compset IDs to data warehouse. We need the IDs for further queries (eg: rates).
         As the list of hotels and compset can change without notice, we will load this once per day, overwriting the existing table.
         """
+        self.logger.info('Hotel CompSet: Reading from API.')
         res = requests.get(self.BASE_URL + 'hotels', params={'token': self.API_TOKEN, 'format': 'csv'})  # Better to use requests module. Can check for "requests.ok" -> HTTP 200.
         df_hotels = pd.read_csv(io.StringIO(res.content.decode('utf-8')))
         #df_hotels.columns = ['hotel_id', 'hotel_name', 'hotel_stars', 'comp_id', 'comp_name', 'comp_stars', 'compset_id', 'compset_name']
@@ -597,7 +598,9 @@ class OTAIDataReader(DataReader):
         df_hotels['CompsetID'] = df_hotels['CompsetID'].astype(str)
 
         # WRITE TO DATABASE #
+        self.logger.info('Hotel Rates: Loading to data warehouse.')
         df_hotels.to_sql('stg_otai_hotels', self.db_conn, index=False, if_exists='replace')
+        # Note that there is no need to write to system log, because no process is checking for this. You can see last load from the snapshot_dt column.
 
     def get_rates_hotel(self, str_hotel_id=None, format='csv', ota='bookingdotcom'):
         """ Calls the OTAI API to get the competitor rates, for a given FEH HotelID.
@@ -666,7 +669,7 @@ class OTAIDataReader(DataReader):
         str_orca_fn = 'otai_' + dt.datetime.strftime(dt.datetime.today(), format='%Y%m%d') + '.csv'  # format: "otai_YYYYMMDD.tsv"
         str_orca_fp = os.path.join(self.config['data_sources']['otai']['ftp_folder'], str_orca_fn)
         df_all['ota'].replace({'bookingdotcom': 'Booking.com'}, inplace=True)  # Legacy. ORCA1 side requested for 'Booking.com' string value.
-        self.logger.info(f'Hotel Rates: Writing data to {str_orca_fp}')
+        self.logger.info(f'Hotel Rates: FOR ORCA1. Writing data to {str_orca_fp}')
         df_all.to_csv(str_orca_fp, sep=',', index=False)
 
         # LOG DATALOAD #
