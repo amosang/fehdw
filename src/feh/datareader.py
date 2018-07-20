@@ -598,7 +598,7 @@ class OTAIDataReader(DataReader):
         df_hotels['CompsetID'] = df_hotels['CompsetID'].astype(str)
 
         # WRITE TO DATABASE #
-        self.logger.info('Hotel Rates: Loading to data warehouse.')
+        self.logger.info('Hotel CompSet: Loading to data warehouse.')
         df_hotels.to_sql('stg_otai_hotels', self.db_conn, index=False, if_exists='replace')
         # Note that there is no need to write to system log, because no process is checking for this. You can see last load from the snapshot_dt column.
 
