@@ -546,10 +546,12 @@ class OTAIDataReader(DataReader):
         self.API_TOKEN = self.config['data_sources']['otai']['token']
         self.BASE_URL = self.config['data_sources']['otai']['base_url']
 
-        # BUFFER HotelIDs and CompsetID INTO MEMORY #
+        # BUFFER HotelIDs and CompsetID INTO MEMORY, EXCEPT FOR OSKL #
         str_sql = """
-        SELECT HotelID, HotelName, CompetitorID, CompetitorName FROM stg_otai_hotels WHERE hotel_category = 'hotel'
-        """
+        SELECT SubscriptionID, HotelID, HotelName, CompetitorID, CompetitorName FROM stg_otai_hotels 
+        WHERE hotel_category = 'hotel'
+        AND HotelID <> '1629556'
+        """  # Exclude OSKL.
         try:
             df = pd.read_sql(str_sql, self.db_conn)  # Read HotelIDs/CompsetIDs into buffer for future querying.
         except Exception:  # pymysql.err.InterfaceError thrown if table does not exist. Make API call only if there's no data. More resilient.
@@ -564,8 +566,8 @@ class OTAIDataReader(DataReader):
             df = pd.read_sql(str_sql, self.db_conn)
             self.df_hotels = df  # Class attribute.
 
-        # List of UNIQUE HotelIDs. For use in future calls (eg: self.load_rates() ).
-        self.l_hotels = set(self.df_hotels['HotelID'].tolist())
+        # List of UNIQUE SubscriptionIDs. For use in future calls (eg: self.load_rates() ).
+        self.l_sub_id = set(self.df_hotels['SubscriptionID'].tolist())
 
     def __del__(self):
         super().__del__()
@@ -575,15 +577,20 @@ class OTAIDataReader(DataReader):
     def load_hotels(self, dt_snapshot_dt=None):
         """ Loads Hotels and Compset IDs to data warehouse. We need the IDs for further queries (eg: rates).
         As the list of hotels and compset can change without notice, we will load this once per day, overwriting the existing table.
+
+        Note1: OSKL is a hotel. However, in OTAIDataReader.__init__(), we exclude it from l_sub_id because we do not want to include this hotel in the Rates API calls. This is because the price ranking is entirely SG oriented.
+
+        Note2: In OTAI's API, URL parameters are written in lower camel case (eg: subscriptionId), and are case-sensitive!
+        Conversely, format=csv header names are written in upper camel case. And they differ also from format=json header names. Go figure...
         """
         self.logger.info('Hotel CompSet: Reading from API.')
         res = requests.get(self.BASE_URL + 'hotels', params={'token': self.API_TOKEN, 'format': 'csv'})  # Better to use requests module. Can check for "requests.ok" -> HTTP 200.
         df_hotels = pd.read_csv(io.StringIO(res.content.decode('utf-8')))
         #df_hotels.columns = ['hotel_id', 'hotel_name', 'hotel_stars', 'comp_id', 'comp_name', 'comp_stars', 'compset_id', 'compset_name']
 
-        # New column. Label the dataset with known Hotels; remainder are deemed to be SRs.
+        # New column. Label the dataset with known Hotels; HotelIds not in the list are deemed to be SRs.
         # Note that this labeling checks against HotelID; it is with reference to FEH's hotels and SRs only.
-        l_hotelid = [25002, 25105, 25106, 25107, 25109, 25119, 25167, 296976, 359549, 613872, 1663218]  # 11 hotels
+        l_hotelid = [25002, 25105, 25106, 25107, 25109, 25119, 25167, 296976, 359549, 613872, 1663218, 1629556]  # 11 hotels + OSKL (1629556). OSKL is excluded from the Rates API calls.
         df_hotels['hotel_category'] = 'sr'  # default value.
         df_hotels['hotel_category'][df_hotels['HotelID'].isin(l_hotelid)] = 'hotel'
         if dt_snapshot_dt is None:
@@ -594,6 +601,7 @@ class OTAIDataReader(DataReader):
         # Keep only the CompsetID = 1 (ie: CompsetName = 'App Primary'). Ignore secondary compset.
         df_hotels = df_hotels[df_hotels['CompsetID'] == 1]
         df_hotels['HotelID'] = df_hotels['HotelID'].astype(str)  # Standardize and convert all ID-type fields to string.
+        df_hotels['SubscriptionID'] = df_hotels['SubscriptionID'].astype(str)
         df_hotels['CompetitorID'] = df_hotels['CompetitorID'].astype(str)
         df_hotels['CompsetID'] = df_hotels['CompsetID'].astype(str)
 
@@ -602,19 +610,19 @@ class OTAIDataReader(DataReader):
         df_hotels.to_sql('stg_otai_hotels', self.db_conn, index=False, if_exists='replace')
         # Note that there is no need to write to system log, because no process is checking for this. You can see last load from the snapshot_dt column.
 
-    def get_rates_hotel(self, str_hotel_id=None, format='csv', ota='bookingdotcom'):
-        """ Calls the OTAI API to get the competitor rates, for a given FEH HotelID.
+    def get_rates_hotel(self, str_sub_id=None, format='csv', ota='bookingdotcom'):
+        """ Calls the OTAI API to get the competitor rates, for a given FEH SubscriptionID.
         Defaults: los: 1, persons:2, mealType: nofilter (lowest), shopLength: 90 (max: 365), changeDays: None (max: 3 values, max: 30 days), compsetIds=1
         Not using parameter: changeDays (we will calculate it ourselves).
         Note: You should call the API using only our own HotelIDs, else you'll get a HTTP 401.
-        :param str_hotel_id:
+        :param str_sub_id:
         :param format:
         :param ota:
         :return:
         """
         params = {'token': self.API_TOKEN,
                   'format': format,
-                  'hotelId': str_hotel_id,  # parameter names are case sensitive.
+                  'subscriptionId': str_sub_id,  # parameter names are case sensitive.
                   'ota': ota
                   }
         res = requests.get(self.BASE_URL + 'rates', params=params)
@@ -645,12 +653,12 @@ class OTAIDataReader(DataReader):
         df_all = DataFrame()  # accumulator
 
         self.logger.info('Hotel Rates: Reading from API.')
-        for hotel_id in self.l_hotels:  # Get the Rates exactly ONCE for each HotelID. List has unique IDs.
-            df = self.get_rates_hotel(str_hotel_id=str(hotel_id))
+        for sub_id in self.l_sub_id:  # Get the Rates exactly ONCE for each SubscriptionID. The list has unique IDs already.
+            df = self.get_rates_hotel(str_sub_id=str(sub_id))
             df_all = df_all.append(df, ignore_index=True)
 
         # De-duplicate rates in df_all. Duplicates may exist because the same hotel is a competitor for 2 (or more) of our hotels.
-        # 16 Mar 2018: It may be the case that if for the same stay_date/hotelid, OTAI returns 2 rows for a hotel, each row being different room_types at the same price!
+        # 16 Mar 2018: It may be the case that if for the same stay_date/hotelid, OTAI returns 2 rows for a hotel, each row being different ROOM TYPES at the same price!
         # Hence the drop_duplicates() below is using the combined key of ['HotelID', 'ArrivalDate', 'Value'].
         df_all.drop_duplicates(subset=['HotelID', 'ArrivalDate', 'Value'], inplace=True)
 
