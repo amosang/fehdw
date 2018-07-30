@@ -68,6 +68,27 @@ def dec_err_handler(retries=0):
     return wrap
 
 
+def _send_email_data_imputation(str_listname, str_subject, l_tab_name):
+    """ Sends email pertaining to data imputation.
+    :return: NA
+    """
+    arb = AdminReportBot()
+
+    str_msg = """       
+    Hello! Just to inform you that I have patched your data feed from the above source system, because the data sources for that source system cannot be accessed for some reason. <br> 
+    This means that I have copied the last successfully loaded copy of this data and used it in place of today's missing data (for that source system only). <br>
+    The ORCA sys admins have been notified and will be looking into this. <br>  
+    Note: Data patching, by design, will only happen for the Opera/EzRMS/FWK data sources. <br><br><br>
+    
+    <strong>Technical info for sys admins</strong> <br>
+    The following tables have been patched: <br>
+    {} <br><br>
+    
+    Check the datareader "global.log" file for more details.
+    """.format(str(l_tab_name))
+    arb.send(str_listname=str_listname, str_subject=str_subject, df=None, str_msg=str_msg, str_msg2='')
+
+
 def check_dataload_not_logged(t_timenow, conn):
     """ This is called from scheduler_load_data.py. Given a Time, check the scheduled data loads table to see
     which jobs are supposed to have run, then look up the data load logs table to look for corresponding entries.
@@ -146,47 +167,27 @@ def check_dataload_not_logged(t_timenow, conn):
         # "ERROR:admin_report_bot:[WinError 10060] A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond"
 
         # If data load fails and the source is EzRMS/Opera/FWK, copy the last successful data load but with a new snapshot_dt #
+        str_listname = 'rm_im_all'  # Send to this mailing list.
         for idx, row in df_out.iterrows():
-            str_subject = '[fehdw_admin] Data Imputation has happened for: {}'.format(row['source'])
+            str_subject = '[{}] Data Patching has been done for: {}'.format(str_listname, row['source'].upper())
 
             # EzRMS Forecast #
             if (row['source'] == 'ezrms') & (row['dest'] == 'mysql') & (row['file'] == 'forecast'):
                 l_tab_name = ['stg_ezrms_forecast']
                 copy_last_snapshot_dt_dataset(l_tab_name=l_tab_name, row=row)
-
-                str_msg = """                
-                Data imputation has happened for the following tables: <br>                
-                {} <br><br>
-                Recall that data imputation will only happen when data loading fails for EzRMS/Opera/FWK data sources.
-                Check the datareader "global.log" file for more details.
-                """.format(str(l_tab_name))
-                arb.send(str_listname='fehdw_admin', str_subject=str_subject, df=None, str_msg=str_msg, str_msg2='')
+                _send_email_data_imputation(str_listname=str_listname, str_subject=str_subject, l_tab_name=l_tab_name)
 
             # Opera #
             if (row['source'] == 'opera') & (row['dest'] == 'mysql') & (row['file'] == '*'):
                 l_tab_name = ['stg_op_act_nonrev', 'stg_op_act_rev', 'stg_op_cag', 'stg_op_otb_nonrev', 'stg_op_otb_rev']
                 copy_last_snapshot_dt_dataset(l_tab_name=l_tab_name, row=row)
-
-                str_msg = """                
-                Data imputation has happened for the following tables: <br>                
-                {} <br><br>
-                Recall that data imputation will only happen when data loading fails for EzRMS/Opera/FWK data sources.
-                Check the datareader "global.log" file for more details.
-                """.format(str(l_tab_name))
-                arb.send(str_listname='fehdw_admin', str_subject=str_subject, df=None, str_msg=str_msg, str_msg2='')
+                _send_email_data_imputation(str_listname=str_listname, str_subject=str_subject, l_tab_name=l_tab_name)
 
             # FWK #
             if (row['source'] == 'fwk') & (row['dest'] == 'mysql') & (row['file'] == '*'):
                 l_tab_name = ['stg_fwk_proj', 'stg_fwk_otb']
                 copy_last_snapshot_dt_dataset(l_tab_name=l_tab_name, row=row)
-
-                str_msg = """                
-                Data imputation has happened for the following tables: <br>                
-                {} <br><br>
-                Recall that data imputation will only happen when data loading fails for EzRMS/Opera/FWK data sources.
-                Check the datareader "global.log" file for more details.
-                """.format(str(l_tab_name))
-                arb.send(str_listname='fehdw_admin', str_subject=str_subject, df=None, str_msg=str_msg, str_msg2='')
+                _send_email_data_imputation(str_listname=str_listname, str_subject=str_subject, l_tab_name=l_tab_name)
 
 
 def check_datarun_not_logged(t_timenow, conn):

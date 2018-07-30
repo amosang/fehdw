@@ -1,5 +1,6 @@
 # PROJECT SPECIFIC #
 ################### https://github.com/github/gitignore
+*.conf
 fehdw.conf
 todo.txt
 .ipynb_checkpoints/

@@ -4,9 +4,14 @@ import re
 import datetime as dt
 from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataReader, EzrmsDataReader, EloquaB2CDataReader
 from feh.utils import *
+import feh.utils
+
+TEST_CASE = 'send_email_data_imputation'     ### TEST CASE!
 
 
-TEST_CASE = 'debug_otai'     ### TEST CASE!
+if TEST_CASE == 'send_email_data_imputation':
+    feh.utils._send_email_data_imputation(str_listname='test_aa', str_subject='TEST', l_tab_name=['stg_123', 'stg_abc'])
+
 
 if TEST_CASE == 'debug_otai':
     otai_dr = OTAIDataReader()
