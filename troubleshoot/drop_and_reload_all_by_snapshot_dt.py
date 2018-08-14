@@ -1,14 +1,14 @@
 # Purpose: This script allows the user to input a snapshot_dt, and the system will drop and reload ALL
-# corresponding records in the staging tables and data marts.
+# corresponding records in the BOTH the STAGING tables AND data marts.
 # It is meant to be used for recovery purposes, in the event that data sources were unavailable, and so on.
-
+# Ensure that all source files (txt/xlsx/etc) to the STAGING tables are in place before running this!
 import datetime as dt
 import sys
 from feh.datareader import DataReader
 from feh.datarunner import DataRunner
 
 ##### CHANGE THIS TO THE SNAPSHOT_DT TO BE DELETED! #####
-STR_SNAPSHOT_DT_TO_DEL = '2018-05-18'  # The snapshot_dt to be deleted. Format: "YYYY-MM-DD"
+STR_SNAPSHOT_DT_TO_DEL = '2018-08-14'  # The snapshot_dt to be deleted. Format: "YYYY-MM-DD"
 ###########
 
 try:

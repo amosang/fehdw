@@ -278,7 +278,7 @@ def check_datarun_not_logged(t_timenow, conn):
         else:
             str_msg2 = ''
 
-        # This is always get sent to the users, as they should always be notified when the run has completed.
+        # This always gets sent to the users, as they should always be notified when the run has completed.
         arb = AdminReportBot()
         arb.send(str_listname=str_listname_rm_im_all, str_subject=str_subject, df=df_out_ok, str_msg=str_msg, str_msg2=str_msg2)
 
