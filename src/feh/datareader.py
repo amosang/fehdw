@@ -250,6 +250,10 @@ class OperaDataReader(DataReader):
     def load_otb(self, pattern=None, dt_snapshot_dt=None):
         """ Loads Opera OTB file which matches the pattern. There should only be 1 per day.
         Also used to load History/Actuals file, because it has a similar format.
+        Important! Note the use of remove_duplicates() immediately after calling this! See that method for details.
+
+        Note (19 Sep 2018): There might be an issue with unhandled duplication ("Reservation" tab) for stg_op_act_rev/stg_op_act_nonrev, ie: Opera Historical. These tables are not used in any of the subsequent datamarts.
+
         :param pattern: Regular expression, to use for filtering file name.
         :return: None
         """
@@ -672,13 +676,6 @@ class OTAIDataReader(DataReader):
 
         # WRITE TO DATABASE #
         df_all.to_sql('stg_otai_rates', self.db_conn, index=False, if_exists='append')
-
-        # Write a tab-separated copy to SFTP server for ORCA1.
-        str_orca_fn = 'otai_' + dt.datetime.strftime(dt.datetime.today(), format='%Y%m%d') + '.csv'  # format: "otai_YYYYMMDD.tsv"
-        str_orca_fp = os.path.join(self.config['data_sources']['otai']['ftp_folder'], str_orca_fn)
-        df_all['ota'].replace({'bookingdotcom': 'Booking.com'}, inplace=True)  # Legacy. ORCA1 side requested for 'Booking.com' string value.
-        self.logger.info(f'Hotel Rates: FOR ORCA1. Writing data to {str_orca_fp}')
-        df_all.to_csv(str_orca_fp, sep=',', index=False)
 
         # LOG DATALOAD #
         self.logger.info('Hotel Rates: Logged data load activity to system log table.')

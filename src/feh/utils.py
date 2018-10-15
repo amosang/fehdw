@@ -383,6 +383,17 @@ def get_files(str_folder=None, pattern=None, latest_only=False):
         return get_latest_file(str_folder=str_folder, pattern=pattern)  # Note: The function will return a 2-values tuple!
 
 
+def prettify_col_names(df):
+    """ Takes in a DataFrame, and prettifies the column names.
+    Returns the same DataFrame.
+    Column transformations:
+    - All to lowercase
+    - Spaces and periods replaced by underscore
+    """
+    df.columns = df.columns.str.lower().str.replace('[. ]', '_')
+    return df
+
+
 def archive_logs(truncate=False):
     """ Archives the logs into a ZIP file, with current datetime in the filename. Existing *.log files all truncated (reinitialized).
     :param truncate: If True, will truncate existing log files.
