@@ -333,11 +333,10 @@ def get_dataload_sched(source, dest, file, conn):
         return t_from, t_to
 
 
-def get_latest_file(str_folder=None, pattern=None):
-    """
-    Given a folder, return the last updated file in that folder.
+def get_latest_file(str_folder: object = None, pattern: object = None) -> object:
+    """ Given a folder, return the last updated file in that folder.
     If pattern (regex) is given, apply pattern as a filter first.
-    :return: A tuple containing (<str_full_filename>, <filename>), or (None, None) if file pattern not found.
+    :return: A tuple containing (<str_fullpath>, <str_filename>), or (None, None) if file pattern not found.
     """
     _, _, l_files = next(os.walk(str_folder))  # First, always get all files in the dir.
 
@@ -356,20 +355,24 @@ def get_latest_file(str_folder=None, pattern=None):
 
         if dt_prev is None:
             dt_prev = dt_curr
-            str_fn_prev = str_fn_curr
+            str_fullpath = str_fn_curr
+            str_filename = file
         else:
             if dt_curr > dt_prev:  # Keep the most recent datetime value.
                 dt_prev = dt_curr
-                str_fn_prev = str_fn_curr
-    return str_fn_prev, file
+                str_fullpath = str_fn_curr
+                str_filename = file
+    return str_fullpath, str_filename
 
 
 def get_files(str_folder=None, pattern=None, latest_only=False):
-    """ Given a directory name, return all full filenames that exist there, and which match the pattern. Can search for latest filename only.
+    """ Given a directory name, return a list of all full filenames that exist there, and which match the pattern. Can search for latest filename only.
     :param str_folder: Directory to search for files.
     :param pattern: A regex expression, to filter the list of files.
     :param latest_only: True, if you want to get the latest filename only.
-    :return: Returns a tuple of (<full filename>, <filename>) if latest_only=True. Otherwise, returns a list of tuples of (<full filename>, <filename>).
+    :return: Returns a tuple of (<full filename>, <filename>) if latest_only=True. Otherwise, returns a list of tuples of (<str_fullpath>, <str_filename>).
+
+    Note: Most cases will use latest_only=True. Except for the less used functions like archive_logs().
     """
     _, _, l_files = next(os.walk(str_folder))  # First, always get all files in the dir.
 
