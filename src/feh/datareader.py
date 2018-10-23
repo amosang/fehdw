@@ -98,7 +98,7 @@ class DataReader(object):
         op_dr = OperaDataReader()
         otai_dr = OTAIDataReader()
 
-        # GET LIST OF TABLE NAMES, FOR WHICH TO DROP RECORDS #
+        # GET LIST OF TABLE NAMES, FOR WHICH TO DROP RECORDS #  The column_name constraint further restricts the selection to tables which have the snapshot_dt column.
         str_sql_tabs = """
         SELECT table_name FROM INFORMATION_SCHEMA.COLUMNS 
         WHERE TABLE_NAME LIKE 'stg%%'

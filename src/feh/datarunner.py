@@ -772,13 +772,16 @@ class OperaOTBDataRunner(DataRunner):
                              'rev_proj_room_nts_new', 'rev_proj_room_nts_diff', 'rev_rmrev_extax_new',
                              'rev_rmrev_extax_diff', 'rev_food_rev_inctax', 'rev_oth_rev_inctax']]
             df_all.rename(columns={'rev_food_rev_inctax': 'rev_food_rev_inctax_diff', 'rev_oth_rev_inctax': 'rev_oth_rev_inctax_diff'}, inplace=True)
+            if len(df_all) > 0:
+                # WRITE TO DATABASE #
+                df_all.to_sql('dm2_op_otb_with_allot_diff', self.conn_fehdw, index=False, if_exists='append')
+                self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_dt_new))
 
-            # WRITE TO DATABASE #
-            df_all.to_sql('dm2_op_otb_with_allot_diff', self.conn_fehdw, index=False, if_exists='append')
-            self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_dt_new))
-
-            # LOG DATA RUN #
-            self.log_datarun(run_id=run_id, str_snapshot_dt=str_dt_new)
+                # LOG DATA RUN #
+                self.log_datarun(run_id=run_id, str_snapshot_dt=str_dt_new)
+            else:
+                self.logger.error(
+                    '[{}] No records found in source table for snapshot_dt: {}'.format(run_id, str_dt_new))
 
     @dec_err_handler(retries=0)
     def proc_op_otb_with_allot_diff_all(self, str_dt_from=None, str_dt_to=None):
@@ -958,12 +961,17 @@ class OccForecastDataRunner(DataRunner):
 
                 # MERGE #
                 df_merge = df_ezrms.merge(df_fwk, how='inner', on=['snapshot_dt', 'stay_date'], suffixes=('_ezrms', '_fwk'))
-                # WRITE TO DATABASE #
-                df_merge.to_sql('dm1_occ_forecasts_ezrms_mkt', self.conn_fehdw, index=False, if_exists='append')
-                self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
 
-            # LOG DATA RUN #
-            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+                if len(df_merge) > 0:
+                    # WRITE TO DATABASE #
+                    df_merge.to_sql('dm1_occ_forecasts_ezrms_mkt', self.conn_fehdw, index=False, if_exists='append')
+                    self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
+
+                    # LOG DATA RUN #
+                    self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+                else:
+                    self.logger.error(
+                        '[{}] No records found in source table for snapshot_dt: {}'.format(run_id, str_date_from))
 
     @dec_err_handler(retries=0)
     def proc_occ_forecasts_all(self, str_dt_from=None, str_dt_to=None):
@@ -1029,12 +1037,17 @@ class OccForecastDataRunner(DataRunner):
                 df_merge['days_ago'] = days
 
                 df_all = df_all.append(df_merge, ignore_index=True)
-            # WRITE TO DATABASE #
-            df_all.to_sql('dm2_occ_forecast_mkt_diff', self.conn_fehdw, index=False, if_exists='append')
-            self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date))
 
-            # LOG DATA RUN #
-            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date)
+            if len(df_all) > 0:
+                # WRITE TO DATABASE #
+                df_all.to_sql('dm2_occ_forecast_mkt_diff', self.conn_fehdw, index=False, if_exists='append')
+                self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date))
+
+                # LOG DATA RUN #
+                self.log_datarun(run_id=run_id, str_snapshot_dt=str_date)
+            else:
+                self.logger.error(
+                    '[{}] No records found in source table for snapshot_dt: {}'.format(run_id, str_date))
 
     @dec_err_handler(retries=0)
     def proc_occ_forecast_mkt_diff_all(self, str_dt_from=None, str_dt_to=None):
@@ -1080,11 +1093,11 @@ class OccForecastDataRunner(DataRunner):
                 # WRITE TO DATABSE #
                 df_ezrms.to_sql('dm1_occ_forecast_ezrms', self.conn_fehdw, index=False, if_exists='append')
                 self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
+
+                # LOG DATARUN #
+                self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
             else:
                 self.logger.error('[{}] No records found in source table for snapshot_dt: {}'.format(run_id, str_date_from))
-
-            # LOG DATARUN #
-            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
 
     @dec_err_handler(retries=0)
     def proc_occ_forecast_ezrms_all(self, str_dt_from=None, str_dt_to=None):
@@ -1140,12 +1153,16 @@ class OccForecastDataRunner(DataRunner):
 
                 df_all = df_all.append(df_merge, ignore_index=True)
 
-            # WRITE TO DATABASE #
-            df_all.to_sql('dm2_occ_forecast_ezrms_diff', self.conn_fehdw, index=False, if_exists='append')
-            self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date))
+            if len(df_all) > 0:
+                # WRITE TO DATABASE #
+                df_all.to_sql('dm2_occ_forecast_ezrms_diff', self.conn_fehdw, index=False, if_exists='append')
+                self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date))
 
-            # LOG DATA RUN #
-            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date)
+                # LOG DATA RUN #
+                self.log_datarun(run_id=run_id, str_snapshot_dt=str_date)
+            else:
+                self.logger.error(
+                    '[{}] No records found in source table for snapshot_dt: {}'.format(run_id, str_date))
 
     @dec_err_handler(retries=0)
     def proc_occ_forecast_ezrms_diff_all(self, str_dt_from=None, str_dt_to=None):
@@ -1356,12 +1373,16 @@ class OTAIDataRunner(DataRunner):
 
             df = pd.read_sql(str_sql, self.conn_fehdw)
 
-            # WRITE TO DATABASE #
-            df.to_sql('dm1_hotel_price_only_evolution', self.conn_fehdw, index=False, if_exists='append')
-            self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
+            if len(df) > 0:
+                # WRITE TO DATABASE #
+                df.to_sql('dm1_hotel_price_only_evolution', self.conn_fehdw, index=False, if_exists='append')
+                self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
 
-            # LOG DATA RUN #
-            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+                # LOG DATA RUN #
+                self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
+            else:
+                self.logger.error(
+                    '[{}] No records found in source table for snapshot_dt: {}'.format(run_id, str_date_from))
 
     @dec_err_handler(retries=0)
     def proc_hotel_price_only_evolution_all(self, str_dt_from=None, str_dt_to=None):
@@ -1446,11 +1467,11 @@ class FWKDataRunner(DataRunner):
                 # WRITE TO DATABASE #
                 df_merge.to_sql('dm1_fwk_source_markets', self.conn_fehdw, index=False, if_exists='append')
                 self.logger.info('[{}] Data processed for snapshot_dt: {}'.format(run_id, str_date_from))
+
+                # LOG DATARUN #
+                self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
             else:
                 self.logger.error('[{}] No records found in source table for snapshot_dt: {}'.format(run_id, str_date_from))
-
-            # LOG DATARUN #
-            self.log_datarun(run_id=run_id, str_snapshot_dt=str_date_from)
 
     @dec_err_handler(retries=0)
     def proc_fwk_source_markets_all(self, str_dt_from=None, str_dt_to=None):

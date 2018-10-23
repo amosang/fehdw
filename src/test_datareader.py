@@ -3,10 +3,24 @@ import os
 import re
 import datetime as dt
 from feh.datareader import DataReader, OperaDataReader, OTAIDataReader, FWKDataReader, EzrmsDataReader, EloquaB2CDataReader
+from feh.datarunner import DataRunner
 from feh.utils import *
 import feh.utils
 
-TEST_CASE = 'send_email_data_imputation'     ### TEST CASE!
+TEST_CASE = 'fix_op_2018-10-19'     ### TEST CASE!
+
+
+
+if TEST_CASE == 'fix_op_2018-10-19':
+    # op_dr = OperaDataReader()  # Cannot use DataReader() class. AttributeError: 'DataReader' object has no attribute 'logger'
+    # d_run = DataRunner()
+    # fwk_dr = FWKDataReader()
+    # d_run.drop_and_reload_data_marts(dt_date=dt.datetime.strptime('2018-10-19', format('%Y-%m-%d')))
+    # fwk_dr.remove_log_dataload('fwk', 'mysql', str_date='2018-10-19')
+    # fwk_dr.load()
+    #op_dr.drop_and_reload_staging_tables(dt_date=dt.datetime.strptime('2018-10-19', format('%Y-%m-%d')))
+    #d_run.drop_and_reload_data_marts()
+    feh.utils.get_latest_file(str_folder='//10.0.2.251/fesftp/FWK', pattern='^FWK_PROJ.+csv$')
 
 
 if TEST_CASE == 'send_email_data_imputation':
