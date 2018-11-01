@@ -525,3 +525,88 @@ def copy_last_snapshot_dt_dataset(l_tab_name, row):
         # LOG DATALOAD #
         dr.logger.info('Imputed data set for table: {} using latest snapshot_dt: {}'.format(str_tab_name, str_date_from))
         dr.log_dataload(row['source'], row['dest'], row['file'])
+
+
+def get_df_sample_values(df=None, threshold=10, filename=sys.stdout):
+    """ Given a DataFrame, output key info about it, and its columns.
+        Inputs:
+        filename. Fully qualified file name string.
+
+        Key Info includes:
+        - df.head(10). Sample rows.
+        - df.shape. num_row x num_cols
+        - df.dtypes. data types of each col.
+        - Top N values by frequency, for each column, sort in descending order of frequency count. With freq count and percent.
+        - Numeric Type specific analysis. If data can be converted to numeric without errors, obtain the min/max/mean/median/SD.
+        [TODO]
+        - Domain-specific checks? Eg: email formats. postcode formats.
+        :return: Does not return anything. Outputs to either sys.stdout or filename.
+    """
+    if filename != sys.stdout:
+        fh = open(filename, 'w',
+                  encoding='utf-8')  # Default is cp1252 on Windows. Use locale.getpreferredencoding(False)
+    else:
+        fh = sys.stdout
+
+    # Output first N rows as complete sample data #
+    print('=== SAMPLE ROWS ===', file=fh)
+    print(df.head(10), file=fh)
+
+    # Output shape of dataframe #
+    print('\n=== SHAPE OF DATA FRAME (row x col) ===: ' + str(df.shape), file=fh)
+
+    # Output data types of each column #
+    print('\n=== COLUMN DATA TYPES ===', file=fh)
+    df.info(buf=fh)
+
+    # Output each column top N most frequent values #
+    print('\n', file=fh)
+    print('=== TOP n VALUES BY FREQUENCY ===', file=fh)
+    if df is not None:
+        for col_name in df.columns:
+            print('[PROCESSING] Column: ' + col_name)  # DEBUG
+
+            i_unique_val_count = len(
+                df[col_name].unique())  # Number of unique data values, for that column. Includes NaN!
+            print('COLUMN: {} | {} unique values.'.format(col_name, i_unique_val_count), file=fh)
+            # print('COLUMN: {} | {} unique values.'.format(col_name, i_unique_val_count))   # DEBUG
+
+            sr = df.groupby([col_name]).size().sort_values(ascending=False,
+                                                           inplace=False, )  # Series. Note: NaN category excluded from groupby!
+            df_count = sr.reset_index(name='count')
+            df_count['percent'] = df_count['count'] / len(
+                df)  # Divide count by total number of records (len(df)), including NaN.
+
+            # print(df_count)  # DEBUG
+
+            print(df_count.iloc[0:threshold, :], file=fh)  # Take N (threshold) number of rows only.
+
+            if threshold < i_unique_val_count:
+                print('[Showing {} of {} unique values]\n'.format(threshold, i_unique_val_count), file=fh)
+            else:
+                print('[Showing {} of {} unique values]\n'.format(i_unique_val_count, i_unique_val_count), file=fh)
+
+    # Output each column's numeric properties, if the underlying data is potentially numeric. #
+    print('=== NUMERIC PROPERTIES OF COLUMNS ===', file=fh)
+    if df is not None:
+        for col_name in df.columns:
+            print('COLUMN: ' + col_name, file=fh)
+
+            try:
+                sr_col = pd.to_numeric(df[col_name])  # Converted to a Series of numeric type.
+                if df[col_name].dtype == '<M8[ns]':  # Date Types are not numeric!
+                    print('Column {} is not numeric. Is a DATE type.'.format(col_name), file=fh)
+                    continue
+                else:
+                    print('Min: {} | Max: {} | Mean: {} | Median: {} | StdDev: {}'.format(round(sr_col.min(), 2),
+                                                                                          round(sr_col.max(), 2),
+                                                                                          round(sr_col.mean(), 2),
+                                                                                          round(sr_col.median(), 2),
+                                                                                          round(sr_col.std(), 2)),
+                          file=fh)
+            except ValueError:
+                print('Column {} is not numeric.'.format(col_name), file=fh)  # Column cannot be converted to numeric.
+
+    # Close the file handle properly.
+    if fh != sys.stdout:
+        fh.close()  # Must be a file handle, so close it.
