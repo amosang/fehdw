@@ -9,6 +9,7 @@ import logging
 import shutil
 import requests
 import sqlalchemy
+import pysftp
 import feh.utils
 from configobj import ConfigObj
 from pandas import DataFrame, Series
@@ -227,6 +228,106 @@ class DataReader(object):
 
         pd.io.sql.execute(str_sql, self.db_conn)
 
+    def copy_sftp_file_latest(self, str_folder_remote=None, str_folder_local=None, str_pattern=None):
+        """ Given a remote folder path in an SFTP server, find the last updated file in that folder str_folder_remote.
+        Copy that file, appending a timestamp appended to its filename, to the target directory str_folder_local.
+
+        If str_pattern (regex) is given, apply pattern as a filter to work with only a subset of files.
+        This makes it quicker as we have to check the mtime of ALL eligible files.
+
+        :return: A tuple containing (<str_file_originalname>, <str_filename_modified_full_path>), or (None, None) if file pattern not found.
+        """
+        # CREATE SFTP CONNECTION TO REMOTE SERVER #
+        str_host = self.config['sftp']['sftp_server']
+        str_userid = self.config['sftp']['userid']
+        str_pw = self.config['sftp']['password']
+
+        cnopts = pysftp.CnOpts()
+        cnopts.hostkeys = None
+        srv = pysftp.Connection(host=str_host, username=str_userid, password=str_pw, cnopts=cnopts)
+        srv.cwd(str_folder_remote)  # Change current working dir to here.
+
+        if str_folder_remote is not None:
+            l_files = srv.listdir(str_folder_remote)  # Get all filenames in the directory.
+
+            # Apply filter to filename list #
+            if str_pattern is not None:
+                l_files = [f for f in l_files if re.search(str_pattern, f)]
+                if len(l_files) == 0:
+                    srv.close()
+                    return (None, None, None)  # Let the calling method handle error logging instead.
+
+            # Get the last modified file, from the filtered list #
+            mtime_out = None  # Initialize outside the loop. Modified time of file.
+            for file in l_files:
+                if srv.isfile(file):  # Only process files, ignore directories.
+                    mtime_curr = (srv.lstat(file)).st_mtime  # Larger float value means later file! Num of secs from 1 Jan 1970.
+
+                    if mtime_out is None:
+                        mtime_out = mtime_curr
+                        str_file_out = file  # "file" refers to the filename alone.
+                    else:
+                        if mtime_curr > mtime_out:  # Keep only the most recent datetime value.
+                            mtime_out = mtime_curr
+                            str_file_out = file  # Overwrite only if timestamp is greater (later).
+
+            # Now we have the last modified file. Modify its filename to include the timestamp, to use as local filename #
+            str_file_out_local = os.path.splitext(str_file_out)[0] + '-' + dt.datetime.strftime(dt.datetime.today(),
+                                                                                                '%Y%m%d_%H%M') + \
+                                 os.path.splitext(str_file_out)[1]
+            # Copy the file over.
+            str_file_out_local_full = str_folder_local + str_file_out_local
+            srv.get(str_file_out, str_file_out_local_full)
+            srv.close()
+            self.logger.info(f'Copied SFTP remote file {str_file_out} to local copy {str_file_out_local_full}')
+
+            return (str_file_out, str_file_out_local_full)
+
+
+    def get_sftp_filename_latest(self, str_folder_remote=None, str_pattern=None):
+        """ Given a remote folder path in an SFTP server, find the last updated file in that folder str_folder_remote.
+        If str_pattern (regex) is given, apply pattern as a filter to work with only a subset of files.
+        This makes it quicker as we have to check the mtime of ALL eligible files.
+
+        :return: Returns the file name, or None if file pattern not found.
+        """
+        # CREATE SFTP CONNECTION TO REMOTE SERVER #
+        str_host = self.config['sftp']['sftp_server']
+        str_userid = self.config['sftp']['userid']
+        str_pw = self.config['sftp']['password']
+
+        cnopts = pysftp.CnOpts()
+        cnopts.hostkeys = None
+        srv = pysftp.Connection(host=str_host, username=str_userid, password=str_pw, cnopts=cnopts)
+        srv.cwd(str_folder_remote)  # Change current working dir to here.
+
+        if str_folder_remote is not None:
+            l_files = srv.listdir(str_folder_remote)  # Get all filenames in the directory.
+
+            # Apply filter to filename list #
+            if str_pattern is not None:
+                l_files = [f for f in l_files if re.search(str_pattern, f)]
+                if len(l_files) == 0:
+                    srv.close()
+                    return None  # Let the calling method handle error logging instead.
+
+            # Get the last modified file, from the filtered list #
+            mtime_out = None  # Initialize outside the loop. Modified time of file.
+            for file in l_files:
+                if srv.isfile(file):  # Only process files, ignore directories.
+                    mtime_curr = (
+                        srv.lstat(file)).st_mtime  # Larger float value means later file! Num of secs from 1 Jan 1970.
+
+                if mtime_out is None:
+                    mtime_out = mtime_curr
+                    str_file_out = file  # "file" refers to the filename alone.
+                else:
+                    if mtime_curr > mtime_out:  # Keep only the most recent datetime value.
+                        mtime_out = mtime_curr
+                        str_file_out = file  # Overwrite only if timestamp is greater (later).
+            srv.close()
+            return str_file_out
+
 
 class OperaDataReader(DataReader):
     """ For reading Opera files, which are output by Vision (run on SQ's laptop), then copied to SFTP server.
@@ -260,39 +361,36 @@ class OperaDataReader(DataReader):
         SOURCE = self.SOURCE_NAME  # 'opera'
         DEST = 'mysql'
         is_history_file = 'History' in pattern
+        str_folder_remote = self.config['data_sources']['opera']['folder_remote']
+        str_folder_local = self.config['data_sources']['opera']['folder_local']
 
-        str_folder = self.config['data_sources']['opera']['root_folder']
-        str_fn_with_path, str_fn = get_files(str_folder=str_folder, pattern=pattern, latest_only=True)
+        # Copy file to server first. We wrote the method to change the incoming file names to have the timestamp in them.
+        str_fn, str_file_out_local_full = self.copy_sftp_file_latest(str_folder_remote=str_folder_remote, str_folder_local=str_folder_local, str_pattern=pattern)
 
         # Check using str_fn if file has already been loaded before. If yes, terminate processing.
         if self.has_exceeded_dataload_freq(source=SOURCE, dest=DEST, file=str_fn):
             str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {str_fn}'
             raise MaxDataLoadException(str_err)
 
-        # Copy file to server first. Rename files to add timestamp, as incoming files ALWAYS have the same names, so will be overwritten.
-        # Leave str_fn untouched, because it is used later to log dataload activity to database.
-        str_fn_with_date = str_fn[:-5] + '-' + dt.datetime.strftime(dt.datetime.today(), '%Y%m%d_%H%M') + str_fn[-5:]
-        str_fn_dst = os.path.join(self.config['global']['global_temp'], str_fn_with_date)
-        shutil.copy(str_fn_with_path, str_fn_dst)
-        self.logger.info(f'Reading file "{str_fn_with_path}". Local copy "{str_fn_dst}"')
+        self.logger.info('Reading file "{}". Local copy "{}"'.format(str_folder_remote + str_fn, str_file_out_local_full))
 
         # READ THE FILES #
-        df_reservation = pd.read_excel(str_fn_dst, sheet_name='Reservation', keep_default_na=False, na_values=[' '])
-        df_allotment = pd.read_excel(str_fn_dst, sheet_name='Allotment', keep_default_na=False, na_values=[' '])
-        df_arr_depart = pd.read_excel(str_fn_dst, sheet_name='Arr Dept', keep_default_na=False, na_values=[' '])
+        df_reservation = pd.read_excel(str_file_out_local_full, sheet_name='Reservation', keep_default_na=False, na_values=[' '])
+        df_allotment = pd.read_excel(str_file_out_local_full, sheet_name='Allotment', keep_default_na=False, na_values=[' '])
+        df_arr_depart = pd.read_excel(str_file_out_local_full, sheet_name='Arr Dept', keep_default_na=False, na_values=[' '])
 
         if '60' in pattern:  # Legacy. This specific tab is somehow named differently in each file!
-            df_sales = pd.read_excel(str_fn_dst, sheet_name='Sales (for Corporate Production', keep_default_na=False, na_values=[' '])
+            df_sales = pd.read_excel(str_file_out_local_full, sheet_name='Sales (for Corporate Production', keep_default_na=False, na_values=[' '])
         else:  # The "61" file here. For the "History" file as well.
-            df_sales = pd.read_excel(str_fn_dst, sheet_name='Sales', keep_default_na=False, na_values=[' '])
+            df_sales = pd.read_excel(str_file_out_local_full, sheet_name='Sales', keep_default_na=False, na_values=[' '])
 
-        df_guest_profile = pd.read_excel(str_fn_dst, sheet_name='Guest profile', keep_default_na=False, na_values=[' '])
-        df_no_of_guest = pd.read_excel(str_fn_dst, sheet_name='No of guest', keep_default_na=False, na_values=[' '])
-        df_rev_vhac_vhb = pd.read_excel(str_fn_dst, sheet_name='Revenue VHAC VHB', keep_default_na=False, na_values=[' '])
-        df_rev_vhc_vhk = pd.read_excel(str_fn_dst, sheet_name='Revenue VHC VHK', keep_default_na=False, na_values=[' '])
-        df_rev_ohs_tqh = pd.read_excel(str_fn_dst, sheet_name='Revenue OHS TQH', keep_default_na=False, na_values=[' '])
-        df_rev_oph_tes = pd.read_excel(str_fn_dst, sheet_name='Revenue OPH TES', keep_default_na=False, na_values=[' '])
-        df_rev_rhs_amoy = pd.read_excel(str_fn_dst, sheet_name='Revenue RHS AMOY', keep_default_na=False, na_values=[' '])
+        df_guest_profile = pd.read_excel(str_file_out_local_full, sheet_name='Guest profile', keep_default_na=False, na_values=[' '])
+        df_no_of_guest = pd.read_excel(str_file_out_local_full, sheet_name='No of guest', keep_default_na=False, na_values=[' '])
+        df_rev_vhac_vhb = pd.read_excel(str_file_out_local_full, sheet_name='Revenue VHAC VHB', keep_default_na=False, na_values=[' '])
+        df_rev_vhc_vhk = pd.read_excel(str_file_out_local_full, sheet_name='Revenue VHC VHK', keep_default_na=False, na_values=[' '])
+        df_rev_ohs_tqh = pd.read_excel(str_file_out_local_full, sheet_name='Revenue OHS TQH', keep_default_na=False, na_values=[' '])
+        df_rev_oph_tes = pd.read_excel(str_file_out_local_full, sheet_name='Revenue OPH TES', keep_default_na=False, na_values=[' '])
+        df_rev_rhs_amoy = pd.read_excel(str_file_out_local_full, sheet_name='Revenue RHS AMOY', keep_default_na=False, na_values=[' '])
 
         # Renaming columns manually. Assumes that source Excel files do not change column positions, or added/deleted columns!
         if is_history_file:
@@ -389,24 +487,22 @@ class OperaDataReader(DataReader):
         SOURCE = self.SOURCE_NAME  # 'opera'
         DEST = 'mysql'
 
-        str_folder = self.config['data_sources']['opera']['root_folder']
-        str_fn_with_path, str_fn = get_files(str_folder=str_folder, pattern=pattern, latest_only=True)
+        str_folder_remote = self.config['data_sources']['opera']['folder_remote']
+        str_folder_local = self.config['data_sources']['opera']['folder_local']
+
+        # Copy file to server first. We wrote the method to change the incoming file names to have the timestamp in them.
+        str_fn, str_file_out_local_full = self.copy_sftp_file_latest(str_folder_remote=str_folder_remote, str_folder_local=str_folder_local, str_pattern=pattern)
 
         # Check using str_fn if file has already been loaded before. If yes, terminate processing.
         if self.has_exceeded_dataload_freq(source=SOURCE, dest=DEST, file=str_fn):
             str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {str_fn}'
             raise MaxDataLoadException(str_err)
 
-        # Copy file to server first. Rename files to add timestamp, as incoming files ALWAYS have the same names, so will be overwritten.
-        # Leave str_fn untouched, because it is used later to log dataload activity to database.
-        str_fn_with_date = str_fn[:-5] + '-' + dt.datetime.strftime(dt.datetime.today(), '%Y%m%d_%H%M') + str_fn[-5:]  # Assumes a ".xlsx" file ext, hence 5 chars.
-        str_fn_dst = os.path.join(self.config['global']['global_temp'], str_fn_with_date)
-        shutil.copy(str_fn_with_path, str_fn_dst)
-        self.logger.info(f'Reading file "{str_fn_with_path}". Local copy "{str_fn_dst}"')
+        self.logger.info('Reading file "{}". Local copy "{}"'.format(str_folder_remote + str_fn, str_file_out_local_full))
 
         # READ THE FILE #
-        df_allot = pd.read_excel(str_fn_dst, sheet_name='Allotment ', keep_default_na=False, na_values=[' '])
-        df_allotgrp = pd.read_excel(str_fn_dst, sheet_name='Allotment +Group', keep_default_na=False, na_values=[' '], usecols='A:U')
+        df_allot = pd.read_excel(str_file_out_local_full, sheet_name='Allotment ', keep_default_na=False, na_values=[' '])
+        df_allotgrp = pd.read_excel(str_file_out_local_full, sheet_name='Allotment +Group', keep_default_na=False, na_values=[' '], usecols='A:U')
 
         df_allot.columns = df_allot.columns[1:].insert(0, 'resort')  # Excel formula causes first column to be read in as 'nan'.
         df_allotgrp.columns = df_allotgrp.columns[1:].insert(0, 'resort')
@@ -463,16 +559,17 @@ class OperaDataReader(DataReader):
         :return: N/A
         """
         # Check if any of the 3 files (60/61/CAG) files are missing, do not load anything Opera at all. This wil allow copy_last_snapshot_dt_dataset() functionality to be triggered. This defends against the scenario where only 60 or 61 file is missing. #
-        str_folder = self.config['data_sources']['opera']['root_folder']
-        _, str_fn1 = feh.utils.get_files(str_folder=str_folder, pattern='60 days.xlsx$', latest_only=True)
-        _, str_fn2 = feh.utils.get_files(str_folder=str_folder, pattern='61 days.xlsx$', latest_only=True)
-        _, str_fn3 = feh.utils.get_files(str_folder=str_folder, pattern='CAG.xlsx$', latest_only=True)
+        str_folder_remote = self.config['data_sources']['opera']['folder_remote']
+        str_fn1 = self.get_sftp_filename_latest(str_folder_remote=str_folder_remote, str_pattern='60 days.xlsx$')
+        str_fn2 = self.get_sftp_filename_latest(str_folder_remote=str_folder_remote, str_pattern='61 days.xlsx$')
+        str_fn3 = self.get_sftp_filename_latest(str_folder_remote=str_folder_remote, str_pattern='CAG.xlsx$')
+
         if (str_fn1 is None) | (str_fn2 is None) | (str_fn3 is None):
             self.logger.error('[{}] Opera data loading terminated. Ensure that 60/61/CAG files are all present.'.format(self.SOURCE_NAME))
         else:
             self.load_otb(pattern='60 days.xlsx$', dt_snapshot_dt=None)  # OTB 0-60 days onwards. Currently always picks the last modified file with this file name.
             self.load_otb(pattern='61 days.xlsx$', dt_snapshot_dt=None)  # OTB 61 days onwards.
-            self.load_cag(pattern='CAG.xlsx$', dt_snapshot_dt=None)  # CAG (Corporate Groups Allocations)
+            self.load_cag(pattern='CAG.xlsx$', dt_snapshot_dt=None)  # CAG (Cancellations, Allocations, Groups)
             self.load_otb(pattern='History.xlsx$', dt_snapshot_dt=None)  # History (aka: Actuals)
             self.remove_duplicates()  # Eliminates duplicates in stg_op_otb_nonrev, potentially caused by "60" and "61" files. Uses today() by default.
 
@@ -713,22 +810,19 @@ class FWKDataReader(DataReader):
         """
         SOURCE = self.SOURCE_NAME  #'fwk'
         DEST = 'mysql'
+        str_folder_remote = self.config['data_sources']['fwk']['folder_remote']
+        str_folder_local = self.config['data_sources']['fwk']['folder_local']
 
-        str_folder = self.config['data_sources']['fwk']['root_folder']
-        str_fn_with_path, str_fn = get_files(str_folder=str_folder, pattern=pattern, latest_only=True)
+        # Copy file to server first. We wrote the method to change the incoming file names to have the timestamp in them.
+        str_fn, str_file_out_local_full = self.copy_sftp_file_latest(str_folder_remote=str_folder_remote, str_folder_local=str_folder_local, str_pattern=pattern)
 
         # Check using str_fn if file has already been loaded before. If yes, terminate processing.
         if self.has_exceeded_dataload_freq(source=SOURCE, dest=DEST, file=str_fn):
             str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {str_fn}'
             raise MaxDataLoadException(str_err)
 
-        # Copy file to server first. Incoming file names already have timestamp in them.
-        str_fn_dst = os.path.join(self.config['global']['global_temp'], str_fn)
-        shutil.copy(str_fn_with_path, str_fn_dst)
-        self.logger.info(f'Reading file "{str_fn_with_path}". Local copy "{str_fn_dst}"')
-
-        # READ THE FILES #
-        df = pd.read_csv(str_fn_dst)
+        # READ THE LOCAL COPY OF THE FILES #
+        df = pd.read_csv(str_file_out_local_full)
         df = df.iloc[:, :-1]  # Drop the last column. Blank.
 
         # Typecasting

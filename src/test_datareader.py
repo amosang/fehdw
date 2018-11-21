@@ -7,8 +7,28 @@ from feh.datarunner import DataRunner
 from feh.utils import *
 import feh.utils
 
-TEST_CASE = 'fix_op_2018-10-19'     ### TEST CASE!
+TEST_CASE = 'test_load_opera'     ### TEST CASE!
 
+if TEST_CASE == 'test_load_opera':
+    op_read = OperaDataReader()
+    op_read.load()
+# op_read.load_otb(pattern='60 days.xlsx$',
+#               dt_snapshot_dt=None)  # OTB 0-60 days onwards. Currently always picks the last modified file with this file name.
+# op_read.load_otb(pattern='61 days.xlsx$', dt_snapshot_dt=None)  # OTB 61 days onwards.
+#     op_read.load_cag(pattern='CAG.xlsx$', dt_snapshot_dt=None)  # CAG (Cancellations, Allocations, Groups)
+#     op_read.load_otb(pattern='History.xlsx$', dt_snapshot_dt=None)  # History (aka: Actuals)
+
+if TEST_CASE == 'test_sftp':
+    fwk_read = FWKDataReader()
+    #fwk_read.copy_sftp_file_latest(str_folder_remote='/C/FESFTP/FWK', str_folder_local='C:/fehdw/temp/', str_pattern='FWK_PROJ')
+    fwk_read.get_sftp_filename_latest(str_folder_remote='/C/FESFTP/FWK', str_pattern='FWK_PROJ')
+
+
+if TEST_CASE == 'ezrms_load_files':
+    ezrms_dr = EzrmsDataReader()
+    # str_date = dt.datetime.strftime(dt.datetime.today(), format='%Y-%m-%d')  # Today
+    # ezrms_dr.remove_log_dataload('ezrms', 'mysql', str_date=str_date)
+    ezrms_dr.load()
 
 
 if TEST_CASE == 'fix_op_2018-10-19':
@@ -79,12 +99,6 @@ if TEST_CASE == 'opera_load_files':
     op_dr = OperaDataReader()
     #op_dr.remove_log_dataload('opera', 'mysql', str_date='2018-02-01')
     op_dr.load()
-
-if TEST_CASE == 'ezrms_load_files':
-    ezrms_dr = EzrmsDataReader()
-    str_date = dt.datetime.strftime(dt.datetime.today(), format='%Y-%m-%d')  # Today
-    ezrms_dr.remove_log_dataload('ezrms', 'mysql', str_date=str_date)
-    ezrms_dr.load()
 
 if TEST_CASE == 'load_files':
     fwk_dr = FWKDataReader()
