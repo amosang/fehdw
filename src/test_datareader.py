@@ -7,7 +7,14 @@ from feh.datarunner import DataRunner
 from feh.utils import *
 import feh.utils
 
-TEST_CASE = 'test_load_opera'     ### TEST CASE!
+TEST_CASE = 'ezrms_load_files'     ### TEST CASE!
+
+if TEST_CASE == 'ezrms_load_files':
+    ezrms_dr = EzrmsDataReader()
+    # str_date = dt.datetime.strftime(dt.datetime.today(), format='%Y-%m-%d')  # Today
+    # ezrms_dr.remove_log_dataload('ezrms', 'mysql', str_date=str_date)
+    ezrms_dr.load()
+
 
 if TEST_CASE == 'test_load_opera':
     op_read = OperaDataReader()
@@ -22,14 +29,6 @@ if TEST_CASE == 'test_sftp':
     fwk_read = FWKDataReader()
     #fwk_read.copy_sftp_file_latest(str_folder_remote='/C/FESFTP/FWK', str_folder_local='C:/fehdw/temp/', str_pattern='FWK_PROJ')
     fwk_read.get_sftp_filename_latest(str_folder_remote='/C/FESFTP/FWK', str_pattern='FWK_PROJ')
-
-
-if TEST_CASE == 'ezrms_load_files':
-    ezrms_dr = EzrmsDataReader()
-    # str_date = dt.datetime.strftime(dt.datetime.today(), format='%Y-%m-%d')  # Today
-    # ezrms_dr.remove_log_dataload('ezrms', 'mysql', str_date=str_date)
-    ezrms_dr.load()
-
 
 if TEST_CASE == 'fix_op_2018-10-19':
     # op_dr = OperaDataReader()  # Cannot use DataReader() class. AttributeError: 'DataReader' object has no attribute 'logger'

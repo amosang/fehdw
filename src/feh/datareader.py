@@ -235,7 +235,7 @@ class DataReader(object):
         If str_pattern (regex) is given, apply pattern as a filter to work with only a subset of files.
         This makes it quicker as we have to check the mtime of ALL eligible files.
 
-        :return: A tuple containing (<str_file_originalname>, <str_filename_modified_full_path>), or (None, None) if file pattern not found.
+        :return: A tuple containing (<str_file_unmodified_name>, <str_filename_modified_full_path>), or (None, None) if file pattern not found.
         """
         # CREATE SFTP CONNECTION TO REMOTE SERVER #
         str_host = self.config['sftp']['sftp_server']
@@ -279,10 +279,9 @@ class DataReader(object):
             str_file_out_local_full = str_folder_local + str_file_out_local
             srv.get(str_file_out, str_file_out_local_full)
             srv.close()
-            self.logger.info(f'Copied SFTP remote file {str_file_out} to local copy {str_file_out_local_full}')
+            self.logger.info(f'Copied SFTP remote file "{str_file_out}" to local copy "{str_file_out_local_full}"')
 
-            return (str_file_out, str_file_out_local_full)
-
+            return str_file_out, str_file_out_local_full
 
     def get_sftp_filename_latest(self, str_folder_remote=None, str_pattern=None):
         """ Given a remote folder path in an SFTP server, find the last updated file in that folder str_folder_remote.

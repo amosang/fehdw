@@ -610,3 +610,17 @@ def get_df_sample_values(df=None, threshold=10, filename=sys.stdout):
     # Close the file handle properly.
     if fh != sys.stdout:
         fh.close()  # Must be a file handle, so close it.
+
+def check_sql_table_exist(tab_name, conn):
+    """ Given an SQL table name and a connection object, check if that table already exists.
+    :param tab_name: Table name.
+    :param conn: Connection object.
+    :return: True if exists, False otherwise.
+    """
+    str_sql = """
+    SELECT COUNT(*) AS count FROM INFORMATION_SCHEMA.tables
+    WHERE TABLE_SCHEMA = 'fehdw'
+    AND TABLE_NAME = '{}'
+    """.format(tab_name)
+    i = pd.read_sql(str_sql, conn)['count'][0]
+    return False if i == 0 else True
