@@ -93,7 +93,7 @@ class DataRunner(object):
         :param run_id: This field comes from the calling "*_all" method.
         :param l_data_src_tabs: Assumes that these tables have "snapshot_dt" column. Will take the smallest intersection of all tables.
         :param str_func_name: The method name to call repeatedly. Assumes that this method is in the current class.
-        :param i_dt_from_offset: Number of days by which to shift "dt_from" later in time.
+        :param i_dt_from_offset: Number of days by which to shift "dt_from" later in time. This value is hardcoded as 3, because that's the shortest look-back period we want to do a "diff" against.
         :param str_dt_from: This field comes from the calling "*_all" method.
         :param str_dt_to: This field comes from the calling "*_all" method.
         :return: NA
@@ -101,39 +101,46 @@ class DataRunner(object):
         dt_from = None
         dt_to = None
 
-        # Get the intersection of snapshot_dts, if multiple tables are involved #
-        for tab in l_data_src_tabs:
-            # Setting upper and lower rational bounds on dt_from and dt_to, to avoid unnecessary processing #
-            str_sql = """
-            SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM {}
-            """.format(tab)
-            sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
-            dt_from_temp = sr['snapshot_dt_min'] + dt.timedelta(days=i_dt_from_offset)  # Shift by N days, because we want a look-back of at least N days.
-            dt_to_temp = sr['snapshot_dt_max']
-
-            if dt_from is None:
-                dt_from = dt_from_temp
-            else:
-                if dt_from_temp > dt_from:
-                    dt_from = dt_from_temp  # for "from", we want the later date.
-
-            if dt_to is None:
-                dt_to = dt_to_temp
-            else:
-                if dt_to_temp < dt_to:
-                    dt_to = dt_to_temp  # for "to", we want the earlier date.
-
-        # Replace the bounds, only if so desired. Can selectively choose to overwrite only dt_from OR dt_to.
-        if str_dt_from is not None:
+        if (str_dt_from is not None) and (str_dt_to is not None):  # Opportunity to skip the time-consuming min+max search ops below (esp if table is huge!), if we give the date_from+date_to ourselves.
             dt_from = pd.to_datetime(str_dt_from)
-        if str_dt_to is not None:
             dt_to = pd.to_datetime(str_dt_to)
+        else:
+            # Get the intersection of snapshot_dts, if multiple tables are involved # Need to do this even if only 1 table is involved, because the 2 dt* vars need to be populated!
+            for tab in l_data_src_tabs:
+                # Setting upper and lower rational bounds on dt_from and dt_to, to avoid unnecessary processing #
+                str_sql = """
+                SELECT MIN(snapshot_dt) AS snapshot_dt_min, MAX(snapshot_dt) AS snapshot_dt_max FROM {}
+                """.format(tab)
+                sr = pd.read_sql(str_sql, self.conn_fehdw).loc[0]
+                dt_from_temp = sr['snapshot_dt_min'] + dt.timedelta(days=i_dt_from_offset)  # Shift by N days, because we want a look-back of at least N days.
+                dt_to_temp = sr['snapshot_dt_max']
 
-        self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
+                if dt_from is None:
+                    dt_from = dt_from_temp
+                else:
+                    if dt_from_temp > dt_from:
+                        dt_from = dt_from_temp  # for "from", we want the later date.
 
-        meth = getattr(self.__class__, str_func_name)  # From the method name, get the method.
-        for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to.
-            meth(self, dt_date=dt_from + dt.timedelta(days=d))
+                if dt_to is None:
+                    dt_to = dt_to_temp
+                else:
+                    if dt_to_temp < dt_to:
+                        dt_to = dt_to_temp  # for "to", we want the earlier date.
+
+            # Replace the bounds, only if so desired. Can selectively choose to overwrite only dt_from OR dt_to.
+            if str_dt_from is not None:
+                dt_from = pd.to_datetime(str_dt_from)
+            if str_dt_to is not None:
+                dt_to = pd.to_datetime(str_dt_to)
+
+        if dt_to.date() < dt_from.date():  # Illogical for dt_to to be less than dt_from! To compare only the date component!
+            self.logger.error('[{}] Invalid duration. dt_to: {} cannot be less than dt_from: {}. Function: {} not processed'.format(run_id, str(dt_to.date()), str(dt_from.date()), str_func_name))
+        else:
+            self.logger.info('[{}] Processing data for period: {} to {}'.format(run_id, str(dt_from.date()), str(dt_to.date())))
+
+            meth = getattr(self.__class__, str_func_name)  # From the method name, get the method.
+            for d in range((dt_to.normalize() - dt_from.normalize()).days + 1):  # +1 to make it inclusive of the dt_to. Note: normalize() is a method of Timestamp, not of datetime.datetime!
+                meth(self, dt_date=dt_from + dt.timedelta(days=d))
 
     def has_been_loaded(self, source, dest, file, dt_date=dt.datetime.today()):
         """ DEPRECATED.
@@ -237,12 +244,28 @@ class DataRunner(object):
 
         pd.io.sql.execute(str_sql, self.conn_fehdw)
 
+    def drop_and_reload_data_marts_daterange(self, str_dt_from=None, str_dt_to=None):
+        """ Given a date range, calls drop_and_reload_data_marts() day-by-day.
+        This is so that we have more flexibility in calling drop_and_reload_data_marts().
+        :param str_dt_from: Start of date range.
+        :param str_dt_to: End of date range.
+        :return:
+        """
+        self.logger.info(f'Calling drop_and_reload_data_marts() for date range {str_dt_from} to {str_dt_to}')
+        for dt_date in pd.date_range(start=str_dt_from, end=str_dt_to):
+            self.logger.info('Processing date: {}'.format(dt.datetime.strftime(dt_date, format='%Y-%m-%d')))
+            self.drop_and_reload_data_marts(dt_date)
+
     def drop_and_reload_data_marts(self, dt_date):
         """ Drops all data marts specified here; reloads them in correct order.
         Has capability to do so for 1) Only the specified dt_date, 2) For all dates.
 
         Due to dependencies, dm1* tables must be re-created before dm2* types.
         ASSUMPTION IS THAT THE STG* TABLES ARE ALREADY UP-TO-DATE!
+
+        For test situations whereby the stg tables contain only 1 snapshot_dt, this may result in the "diff" tables
+        such as dm2_occ_forecast_mkt_diff not being produced as expected, when this method is run.
+        The problem goes away if there are at least 4 snapshot_dts in the feeder tables.
 
         For greater control over the process, something which is dropped will be reloaded soonest possible, instead of dropping all tables at once.
         Each logical group of tables will be treated as a set, and dropped as a set.
@@ -353,7 +376,9 @@ class DataRunner(object):
             str_sql = """
             DELETE FROM dm1_occ_forecasts_ezrms_mkt WHERE snapshot_dt = '{}'
             """.format(str_date)
-            pd.io.sql.execute(str_sql, self.conn_fehdw)
+
+            if feh.utils.check_sql_table_exist('dm1_occ_forecasts_ezrms_mkt', self.conn_fehdw):
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
             of_dr.remove_log_datarun(run_id='proc_occ_forecasts', str_snapshot_dt=str_date)
             of_dr.proc_occ_forecasts_all(str_dt_from=str_date, str_dt_to=str_date)
 
@@ -362,7 +387,9 @@ class DataRunner(object):
             str_sql = """
             DELETE FROM dm2_occ_forecast_mkt_diff WHERE snapshot_dt = '{}'
             """.format(str_date)
-            pd.io.sql.execute(str_sql, self.conn_fehdw)
+
+            if feh.utils.check_sql_table_exist('dm2_occ_forecast_mkt_diff', self.conn_fehdw):
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
             of_dr.remove_log_datarun(run_id='proc_occ_forecast_mkt_diff', str_snapshot_dt=str_date)
             of_dr.proc_occ_forecast_mkt_diff_all(str_dt_from=str_date, str_dt_to=str_date)
 
@@ -371,12 +398,14 @@ class DataRunner(object):
             str_sql = """
             DELETE FROM dm1_occ_forecast_ezrms WHERE snapshot_dt = '{}'
             """.format(str_date)
-            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            if feh.utils.check_sql_table_exist('dm1_occ_forecast_ezrms', self.conn_fehdw):
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
 
             str_sql = """
             DELETE FROM dm2_occ_forecast_ezrms_diff WHERE snapshot_dt = '{}'
             """.format(str_date)
-            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            if feh.utils.check_sql_table_exist('dm2_occ_forecast_ezrms_diff', self.conn_fehdw):
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
 
             of_dr.remove_log_datarun(run_id='proc_occ_forecast_ezrms', str_snapshot_dt=str_date)
             of_dr.remove_log_datarun(run_id='proc_occ_forecast_ezrms_diff', str_snapshot_dt=str_date)
@@ -388,12 +417,14 @@ class DataRunner(object):
             str_sql = """
             DELETE FROM dm1_op_otb_with_allot WHERE snapshot_dt = '{}'            
             """.format(str_date)
-            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            if feh.utils.check_sql_table_exist('dm1_op_otb_with_allot', self.conn_fehdw):
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
 
             str_sql = """
             DELETE FROM dm2_op_otb_with_allot_diff WHERE snapshot_dt = '{}'            
             """.format(str_date)
-            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            if feh.utils.check_sql_table_exist('dm2_op_otb_with_allot_diff', self.conn_fehdw):
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
 
             op_dr.remove_log_datarun(run_id='proc_op_otb_with_allot', str_snapshot_dt=str_date)
             op_dr.remove_log_datarun(run_id='proc_op_otb_with_allot_diff', str_snapshot_dt=str_date)
@@ -405,7 +436,9 @@ class DataRunner(object):
             str_sql = """
             DELETE FROM dm1_hotel_price_rank WHERE snapshot_dt = '{}'
             """.format(str_date)
-            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            if feh.utils.check_sql_table_exist('dm1_hotel_price_rank', self.conn_fehdw):
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
+
             otai_dr.remove_log_datarun(run_id='proc_hotel_price_rank', str_snapshot_dt=str_date)
             otai_dr.proc_hotel_price_rank_all(str_dt_from=str_date, str_dt_to=str_date)
 
@@ -414,7 +447,9 @@ class DataRunner(object):
             str_sql = """
             DELETE FROM dm1_hotel_price_only_evolution WHERE snapshot_dt = '{}'
             """.format(str_date)
-            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            if feh.utils.check_sql_table_exist('dm1_hotel_price_only_evolution', self.conn_fehdw):
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
+
             otai_dr.remove_log_datarun(run_id='proc_hotel_price_only_evolution', str_snapshot_dt=str_date)
             otai_dr.proc_hotel_price_only_evolution_all(str_dt_from=str_date, str_dt_to=str_date)
 
@@ -423,7 +458,9 @@ class DataRunner(object):
             str_sql = """
             DELETE FROM dm2_hotel_price_otb_evolution WHERE snapshot_dt = '{}'
             """.format(str_date)
-            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            if feh.utils.check_sql_table_exist('dm2_hotel_price_otb_evolution', self.conn_fehdw):
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
+
             otai_dr.remove_log_datarun(run_id='proc_hotel_price_otb_evolution', str_snapshot_dt=str_date)
             otai_dr.proc_hotel_price_otb_evolution_all(str_dt_from=str_date, str_dt_to=str_date)
 
@@ -432,7 +469,9 @@ class DataRunner(object):
             str_sql = """
             DELETE FROM dm2_adr_occ_fc_price WHERE snapshot_dt = '{}'
             """.format(str_date)
-            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            if feh.utils.check_sql_table_exist('dm2_adr_occ_fc_price', self.conn_fehdw):
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
+
             op_dr.remove_log_datarun(run_id='proc_target_adr_with_otb_price_fc', str_snapshot_dt=str_date)
             op_dr.proc_target_adr_with_otb_price_fc_all(str_dt_from=str_date, str_dt_to=str_date)
 
@@ -441,7 +480,9 @@ class DataRunner(object):
             str_sql = """
             DELETE FROM dm1_fwk_source_markets WHERE snapshot_dt = '{}'
             """.format(str_date)
-            pd.io.sql.execute(str_sql, self.conn_fehdw)
+            if feh.utils.check_sql_table_exist('dm1_fwk_source_markets', self.conn_fehdw):
+                pd.io.sql.execute(str_sql, self.conn_fehdw)
+
             fwk_dr.remove_log_datarun(run_id='proc_fwk_source_markets', str_snapshot_dt=str_date)
             fwk_dr.proc_fwk_source_markets_all(str_dt_from=str_date, str_dt_to=str_date)
 
@@ -451,13 +492,14 @@ class DataRunner(object):
         Records to be moved are dependent on snapshot_dt, and on the lookback periods specified in the table: sys_cfg_dm_archive_lookback.
 
         Notes:
-        1)The idea behind archiving the records, is so that the users download less records, from the viz layer, which are pointing to fixed tables.
+        1)The idea behind archiving the records is to speed up the user experience by interacting with less records.
+        The viz layer draws from the stg* tables, which are trimmed daily.
         2) Multiple runs of this method should not matter, because nothing will happen as the rows have already been
         moved over to their respective archive tables already.
         3) The effects of this method are cumulative, ie: even if it has not been run on 1 day, running it at a later
         date will still be okay.
-        4) The technique used here is not transaction safe, as MyISAM DB engine does not support transactions.
-        However, we do not expect to have issues, given that the manipulations happen in seconds, and purely at the DB layer only.
+        4) The technique used here is NOT transaction safe, as MyISAM DB engine does not support transactions.
+        However, we do not expect to have issues, given that the manipulations happen in seconds, and purely at the DB layer only (no copying to Python and back).
         We also have the ability to rebuild the data marts completely from scratch using only the staging tables, in the worse-case scenario.
         https://stackoverflow.com/questions/8036005/myisam-engine-transaction-support.
 
@@ -543,7 +585,7 @@ class DataRunner(object):
             str_userid = self.config['data_sources']['mysql_listman']['userid']
             str_pw = self.config['data_sources']['mysql_listman']['password']
 
-            str_cmd = f'"C:\Program Files\MySQL\MySQL Workbench 6.3 CE\mysqldump.exe" -u {str_userid} -p{str_pw} listman > "{str_dir}/listman_db.sql"'
+            str_cmd = f'"C:\Program Files\MySQL\MySQL Workbench 8.0 CE\mysqldump.exe" -u {str_userid} -p{str_pw} listman > "{str_dir}/listman_db.sql"'
             subprocess.run(str_cmd, shell=True)
 
             # DUMP FEHDW TABLES #
@@ -571,7 +613,7 @@ class DataRunner(object):
             str_pw = self.config['data_sources']['mysql']['password']
 
             for tab in l_tabs:
-                str_cmd = f'"C:\Program Files\MySQL\MySQL Workbench 6.3 CE\mysqldump.exe" -u {str_userid} -p{str_pw} fehdw {tab} > "{str_dir}/{tab}.sql"'
+                str_cmd = f'"C:\Program Files\MySQL\MySQL Workbench 8.0 CE\mysqldump.exe" -u {str_userid} -p{str_pw} fehdw {tab} > "{str_dir}/{tab}.sql"'
                 subprocess.run(str_cmd, shell=True)
 
             # ZIP. Compression ratio quite good.
@@ -590,8 +632,7 @@ class DataRunner(object):
             n = 7  # Number of ZIP files to keep.
 
             for path, subdirs, files in os.walk(str_dir):
-                l_files = sorted(files, key=lambda name: os.path.getmtime(os.path.join(path, name)),
-                                 reverse=True)  # List of files in descending order of modified time.
+                l_files = sorted(files, key=lambda name: os.path.getmtime(os.path.join(path, name)), reverse=True)  # List of files in descending order of modified time.
 
             if len(l_files) > n:
                 for file in l_files[n:]:
