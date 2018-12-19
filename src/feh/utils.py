@@ -386,14 +386,29 @@ def get_files(str_folder=None, pattern=None, latest_only=False):
         return get_latest_file(str_folder=str_folder, pattern=pattern)  # Note: The function will return a 2-values tuple!
 
 
-def prettify_col_names(df):
+def convert_str_camelcase_to_snakecase(str):
+    """ Given a CamelCase string, convert it to snake_case.
+    Ref: https://stackoverflow.com/questions/1175208/elegant-python-function-to-convert-camelcase-to-snake-case
+    """
+    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2',
+                str)  # The '\1_\2' probably refers to the 2 parts logically grouped by the pattern, using the parentheses.
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+
+
+def prettify_col_names(df, camel_to_snake=True):
     """ Takes in a DataFrame, and prettifies the column names.
     Returns the same DataFrame.
     Column transformations:
     - All to lowercase
     - Spaces and periods replaced by underscore
+    - convert_str_camelcase_to_snakecase()
     """
-    df.columns = df.columns.str.lower().str.replace('[. ]', '_')
+    df.columns = df.columns.str.replace('[. ]', '_')
+
+    if camel_to_snake:
+        df.columns = df.columns.to_series().reset_index(drop=True).apply(convert_str_camelcase_to_snakecase)
+
+    df.columns = df.columns.str.lower()  # This will always run.
     return df
 
 
