@@ -805,7 +805,7 @@ class OperaOTBDataRunner(DataRunner):
                     df_all = df_all.append(df_diff)
 
             # Bring in the hotel room inventory as another column, for calculating Occupancy #
-            str_sql = """ SELECT old_code as hotel_code, room_inventory FROM cfg_map_properties WHERE asset_type = 'hotel' AND operator = 'feh' """
+            str_sql = """ SELECT hotel_code, room_inventory FROM cfg_map_properties WHERE asset_type = 'hotel' AND operator = 'feh' """
             df_hotel_rms = pd.read_sql(str_sql, self.conn_fehdw)
             df_all = df_all.merge(df_hotel_rms, how='left', on=['hotel_code'])
             df_all = df_all[['snapshot_dt', 'days_ago', 'stay_date', 'hotel_code', 'room_inventory', 'sale_comp_name',
@@ -855,7 +855,7 @@ class OperaOTBDataRunner(DataRunner):
             SELECT A.*, B.peak_occ_med_adr_feh, B.peak_occ_med_adr_compset FROM 
             (SELECT snapshot_dt, stay_date, hotel_code, booking_status_code, rev_marketcode, rev_proj_room_nts, rev_rmrev_extax FROM dm1_op_otb_with_allot) AS A
             INNER JOIN
-            (SELECT old_code AS hotel_code, peak_occ_med_adr_feh, peak_occ_med_adr_compset FROM cfg_map_properties
+            (SELECT hotel_code, peak_occ_med_adr_feh, peak_occ_med_adr_compset FROM cfg_map_properties
             WHERE operator = 'feh' AND asset_type = 'hotel') AS B
             ON A.hotel_code = B.hotel_code
             WHERE A.rev_proj_room_nts > 0  -- Drop these records, because they are not needed. More efficient. There's a small chance its presence might affect the denominator and thus occupancy.
@@ -985,7 +985,7 @@ class OccForecastDataRunner(DataRunner):
             (SELECT snapshot_dt, date AS stay_date, hotel_code, occ_rooms AS rm_nts FROM stg_ezrms_forecast
             WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}' ) AS A
             INNER JOIN 
-            (SELECT old_code AS hotel_code, room_inventory FROM cfg_map_properties
+            (SELECT hotel_code, room_inventory FROM cfg_map_properties
             WHERE asset_type = 'hotel' AND operator = 'feh') AS B            
             ON A.hotel_code = B.hotel_code
             """.format(str_date_from, str_date_to)
@@ -1121,7 +1121,7 @@ class OccForecastDataRunner(DataRunner):
             (SELECT snapshot_dt, date AS stay_date, hotel_code, occ_rooms AS rm_nts_ezrms FROM stg_ezrms_forecast
             WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}' ) AS A
             INNER JOIN 
-            (SELECT old_code AS hotel_code, room_inventory FROM cfg_map_properties
+            (SELECT hotel_code, room_inventory FROM cfg_map_properties
             WHERE asset_type = 'hotel' 
             AND operator = 'feh') AS B            
             ON A.hotel_code = B.hotel_code
@@ -1304,7 +1304,7 @@ class OTAIDataRunner(DataRunner):
 
                 # Bring in the "old hotel code" column. For merging use later in the viz level.
                 str_sql = """
-                SELECT otai_hotel_id AS hotel_id, old_code AS hotel_code FROM cfg_map_properties
+                SELECT otai_hotel_id AS hotel_id, hotel_code FROM cfg_map_properties
                 WHERE operator = 'feh' AND asset_type = 'hotel'
                 """
                 df_hotel_codes = pd.read_sql(str_sql, self.conn_fehdw)
@@ -1350,7 +1350,7 @@ class OTAIDataRunner(DataRunner):
             SELECT A.*, B.room_inventory, B.otai_hotel_id FROM 
             (SELECT snapshot_dt, stay_date, hotel_code, booking_status_code, rev_marketcode, rev_proj_room_nts FROM dm1_op_otb_with_allot) AS A
             INNER JOIN
-            (SELECT old_code AS hotel_code, otai_hotel_id, hotel_name, room_inventory FROM cfg_map_properties
+            (SELECT hotel_code, otai_hotel_id, hotel_name, room_inventory FROM cfg_map_properties
             WHERE operator = 'feh' AND asset_type = 'hotel') AS B
             ON A.hotel_code = B.hotel_code
             WHERE snapshot_dt >= '{}' AND snapshot_dt < '{}'
