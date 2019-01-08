@@ -869,7 +869,8 @@ class EzrmsDataReader(DataReader):
 
     @dec_err_handler(retries=5)
     def load_forecast(self, dt_snapshot_dt=None):
-        """ Download and load the Forecast TSV file. Transforms the data set from wide to long as well.
+        """ DEPRECATED (8 Jan 2019). Replaced by load_forecast_ezrms().
+        Download and load the Forecast TSV file. Transforms the data set from wide to long as well.
         Note: If the layout of the Forecast TSV file changes (eg: due to addition of new hotels), the code to read the
         source file needs to change too. The database table schema however, is already in long form and can continue as-is.
 
@@ -963,11 +964,109 @@ class EzrmsDataReader(DataReader):
         driver.close()  # Close the browser
         os.remove(str_fn_with_path)  # Delete the TSV file.
 
+    @dec_err_handler(retries=5)
+    def load_forecast_ezrms(self, dt_snapshot_dt=None):
+        """ Download and load the Forecast TSV file.
+        Relies on the EzRMS custom report "Regional Forecast Analysis – Long format - hotel_name"
+
+        NOTE: This method is meant to replace load_forecast(), as the output from the new EzRMS report
+        "Regional Forecast Analysis – Long format - hotel_name" requires less data wrangling on our part here.
+        """
+        from selenium import webdriver
+        from selenium.common.exceptions import NoSuchElementException
+
+        SOURCE = self.SOURCE_NAME  # 'ezrms'
+        DEST = 'mysql'
+        FILE = 'forecast'
+
+        # Check using str_fn if file has already been loaded before. If yes, terminate processing.
+        if self.has_exceeded_dataload_freq(source=SOURCE, dest=DEST, file=FILE):
+            str_err = f'Maximum data load frequency exceeded. Source: {SOURCE}, Dest: {DEST}, File: {FILE}'
+            raise MaxDataLoadException(str_err)
+
+        self.logger.info('Initiating Chrome webdriver and logging in to EzRMS')
+        # Path to chromedriver executable. Get latest versions from https://sites.google.com/a/chromium.org/chromedriver/downloads
+        str_fn_chromedriver = os.path.join(self.config['global']['global_bin'], 'chromedriver_2.37.exe')
+        driver = webdriver.Chrome(executable_path=str_fn_chromedriver)  # NOTE: Check for presence of 'options!'.
+        driver.get('https://bw8.ezrms.infor.com/ezmingle.isp')
+        driver.switch_to.frame('Infor Generic Application')
+        driver.switch_to.frame('main')
+
+        input_email = driver.find_element_by_xpath('//*[@id="email"]')
+        input_email.send_keys(self.config['data_sources']['ezrms']['userid'])
+        input_password = driver.find_element_by_xpath('//*[@id="password"]')
+        input_password.send_keys(self.config['data_sources']['ezrms']['password'])
+        input_password.submit()  # Walks up the tree until it finds the enclosing Form, and submits that. http://selenium-python.readthedocs.io/navigating.html
+
+        # DOWNLOAD TSV, READ THE DATA #
+        self.logger.info('Downloading Forecast TSV file')
+        driver.get('https://bw8.ezrms.infor.com//fav.isp?favcat=User&favgroup=2&favid=84293&favname=Regional+Forecast+Analysis+%E2%80%93+Long+format+-+hotel_name&favsubcat=amosang%40fareast.com.sg&period=16')
+        time.sleep(2)  # Just in case. The below statement *might* occur before the above statement completes, leading to error.
+        driver.switch_to.frame('main')
+        t = driver.find_elements_by_class_name('ezhiddenblock')[3]  # Thru trial-and-error. It's the third block
+
+        # A N-digit string, eg: "117475". Done this way because this string changes with each session!
+        match = re.search('\d+(?=\w+)', t.get_attribute('id'))  # Searching for some digits followed by some word characters.
+        if match:  # ie: There's a match
+            str_id = match.group(0)
+            str_xpath = '//*[@id="group_ID{}"]/tbody/tr/td/div/table/tbody/tr/td[2]/table/tbody/tr[1]/td/span/img'.format(str_id)
+        else:
+            raise Exception('Unable to determine str_xpath for the "3-dots" button')  # Handled by decorator.
+
+        try:
+            driver.find_element_by_xpath(str_xpath).click()  # 3 vertical dots icon
+        except NoSuchElementException:
+            raise Exception('NoSuchElementException encountered when trying to download Forecast TSV file')
+
+        driver.switch_to.frame('ezpopupselectwindow')
+        driver.find_element_by_xpath('/html/body/table/tbody/tr[3]/td').click()  # Export to TSV. Apparently clicking on the img works, even though there's no on-click event on it.
+        time.sleep(8)  # The TSV file downloads asynchronously in a separate process. We need the file to be present before continuing!
+        str_dl_folder = os.path.join(os.getenv('USERPROFILE'), 'Downloads')  # eg: 'Downloads' folder of the user.
+        str_fn_with_path, str_fn = get_files(str_folder=str_dl_folder, pattern='table.tsv$', latest_only=True)
+
+        self.logger.info('Using as EzRMS Forecast file: {}'.format(str_fn))
+
+        df = pd.read_csv(str_fn_with_path, sep='\t', skiprows=1, skipfooter=7, engine='python')
+
+        df.columns = ['date', 'dow', 'hotel_name', 'occ_rooms', 'occ_percent']
+        df.drop(labels=['dow'], axis=1, inplace=True)  # 'dow' column not needed.
+
+        # Typecasting and other clean ups.
+        df['date'] = pd.to_datetime(df['date'])
+        df['occ_percent'] = df['occ_percent'].apply(lambda x: x.rstrip('%')).astype(
+            'float') / 100  # Convert percentage string to float.
+
+        # Translate hotel_name_ezrms to hotel_code (old Opera code).
+        str_sql = """
+        SELECT hotel_name_ezrms AS hotel_name, hotel_code FROM cfg_map_properties
+        WHERE operator = 'feh'
+        AND asset_type = 'hotel'
+        """
+        df_ezrms_name_and_code = pd.read_sql(str_sql, self.db_conn)
+        df_merge = df.merge(df_ezrms_name_and_code, how='left', on='hotel_name')
+        df_merge = df_merge[['date', 'hotel_code', 'occ_rooms', 'occ_percent']]
+
+        if dt_snapshot_dt is None:
+            df_merge['snapshot_dt'] = dt.datetime.now()
+        else:
+            df_merge['snapshot_dt'] = dt_snapshot_dt
+        df_forecast = df_merge
+
+        self.logger.info('Writing to database.')
+        df_forecast.to_sql('stg_ezrms_forecast', self.db_conn, index=False, if_exists='append')
+
+        # LOG DATALOAD #
+        self.logger.info('Logged data load activity to system log table.')
+        self.log_dataload('ezrms', 'mysql', FILE)
+
+        driver.close()  # Close the browser
+        os.remove(str_fn_with_path)  # Delete the TSV file.
+
     def load(self, dt_snapshot_dt=None):
         """ Loads data from a related cluster of data sources.
         If dt_snapshot_dt is given, will use this as the snapshot_dt, instead of the current run date.
         """
-        self.load_forecast(dt_snapshot_dt=None)  # EzRMS's forecast of what the occupancies. Tightly coupled with the EzRMS report used.
+        self.load_forecast_ezrms(dt_snapshot_dt=None)  # EzRMS's occupancy forecast. Data processing is tightly coupled with the EzRMS report used.
 
 
 class EloquaB2CDataReader(DataReader):

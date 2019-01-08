@@ -7,7 +7,14 @@ from feh.datarunner import DataRunner
 from feh.utils import *
 import feh.utils
 
-TEST_CASE = 'ezrms_load_files'     ### TEST CASE!
+TEST_CASE = 'ezrms_new_report'     ### TEST CASE!
+
+# 7 Jan -> To test this.
+if TEST_CASE == 'ezrms_new_report':
+    ezrms_dr = EzrmsDataReader()
+    # str_date = dt.datetime.strftime(dt.datetime.today(), format='%Y-%m-%d')  # Today
+    # ezrms_dr.remove_log_dataload('ezrms', 'mysql', str_date=str_date)
+    ezrms_dr.load_forecast_ezrms()
 
 if TEST_CASE == 'ezrms_load_files':
     ezrms_dr = EzrmsDataReader()

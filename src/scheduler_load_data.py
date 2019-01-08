@@ -34,7 +34,7 @@ if t_from <= TIME_NOW < t_to:
     otai_dr.load()
 
 # EzRMS #
-# Data Access Window: After 0930 hrs. Avoid simultaneous run with the other one.
+# Data Access Window: After 0900 hrs. Avoid simultaneous run with the other one.
 t_from, t_to = feh.utils.get_dataload_sched(source='ezrms', dest='mysql', file='forecast', conn=dr.db_conn)
 if t_from <= TIME_NOW < t_to:
     ezrms_dr = EzrmsDataReader()
